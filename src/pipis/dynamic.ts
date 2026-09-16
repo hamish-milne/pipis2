@@ -1,4 +1,4 @@
-import type { Cleanup, JSXElement, Reactive } from "./core";
+import type { Cleanup, JSXElement, ChildrenProp, Reactive } from "./core";
 
 export function Repeat({
   count,
@@ -133,4 +133,20 @@ export function Effect({ children }: { children: () => Cleanup | undefined }): J
     cleanup?.();
     cleanup = children();
   };
+}
+
+export function defineContext<T>(defaultValue: T) {
+  const stack = [defaultValue];
+  function context_provider<U>(value: T, inner: () => U): U {
+    stack.push(value);
+    try {
+      return inner();
+    } finally {
+      stack.pop();
+    }
+  }
+  function context_consumer() {
+    return stack[stack.length - 1];
+  }
+  return [context_provider, context_consumer] as const;
 }

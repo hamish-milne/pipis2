@@ -1,5 +1,5 @@
 import { jsx, type Component, type JSXKey } from "./jsx-runtime";
-import type { JSXProps } from "./core";
+import type { ChildrenProp } from "./core";
 export { Fragment } from "./core";
 
 export type SourceInfo = {
@@ -10,7 +10,7 @@ export type SourceInfo = {
 
 export function jsxDEV(
   type: Component,
-  props: JSXProps,
+  props: ChildrenProp,
   key?: JSXKey,
   isStaticChildren?: boolean,
   source?: SourceInfo,

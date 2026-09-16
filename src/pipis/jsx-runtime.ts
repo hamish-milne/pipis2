@@ -1,16 +1,16 @@
 import {
   type JSXElement,
-  type JSXProps,
+  type ChildrenProp,
   createElement,
   type IntrinsicElements as CoreIntrinsicElements,
 } from "./core";
 export { Fragment } from "./core";
 
-export type Component = keyof CoreIntrinsicElements | ((props: JSXProps) => JSXElement);
+export type Component = keyof CoreIntrinsicElements | ((props: ChildrenProp) => JSXElement);
 
 export type JSXKey = string | number | null;
 
-export function jsx(type: Component, props: JSXProps, key?: JSXKey): JSXElement {
+export function jsx(type: Component, props: ChildrenProp, key?: JSXKey): JSXElement {
   return typeof type === "string" ? createElement(type, props) : type(props);
 }
 

@@ -64,7 +64,7 @@ For 'intrinsic' elements, a.k.a. HTML tags, _pipis_ creates and persists the cor
 
 For custom components, that is any function accepting a 'props' object and returning a JSX Element, we simply call the component function with the provided props. The expression `<Foo />` is identical to `Foo({})`, and you can use them interchangeably.
 
-A fragment (`<>...</>`), representing a collection of child nodes without a wrapping DOM element, is simply an ordinary component called `Fragment` with a custom mount behavior that renders its children into the parent. You can even call it directly if you want.
+A fragment (`<>...</>`), representing a collection of child nodes without a wrapping DOM node, is simply an ordinary component called `Fragment` with a custom mount behavior that renders its children into the parent. You can even call it directly if you want.
 
 ## Reactive bindings
 
@@ -193,7 +193,7 @@ function App() {
 }
 ```
 
-Where all else fails, you can use `Dynamic` to render any content derived from any reactive value. Note that this will completely throw away and recreate the DOM elements whenever the state changes which, naturally, is bad for performance. Consider carefully if one of the more structured patterns above could be used instead.
+Where all else fails, you can use `Dynamic` to render any content derived from any reactive value. Note that this will completely throw away and recreate the DOM nodes whenever the state changes which, naturally, is bad for performance. Consider carefully if one of the more structured patterns above could be used instead.
 
 ```tsx
 function App() {
@@ -280,4 +280,32 @@ function App() {
 }
 ```
 
-_useCallback_ can be omitted entirely because functions can be defined directly in the component body without worrying about unnecessary re-renders.
+Instead of _createContext_ and _useContext_, use `defineContext` to create a context provider and consumer. Context values are resolved when the element is constructed. You can pass a `Reactive<T>` as the context value if needed.
+
+```tsx
+const [withTheme, getTheme] = defineContext(reactive("light"));
+
+function ThemedButton() {
+  return <button className={getTheme()}>Themed Button</button>;
+}
+
+function App() {
+  return withTheme("dark", () => (
+    <div>
+      <ThemedButton />
+    </div>
+  ));
+}
+```
+
+_useCallback_ can usually be omitted entirely: there's no need to memoize functions for performance reasons as in React.
+
+To get a reference to a DOM node, you can use the `ref` prop. The `ref` can be either a function that receives the element or an object with a `value` property that will be set to the element (such as a reactive value). Since DOM nodes are persistent, the reference will be set once when the element is constructed and never cleared, and it is guaranteed to be set before the parent element is ever mounted. Just like in React, there is no special handling for `ref` in custom components.
+
+```tsx
+function App() {
+  const divRef = reactive<HTMLElement | null>(null);
+
+  return <div ref={divRef}>Hello, world!</div>;
+}
+```

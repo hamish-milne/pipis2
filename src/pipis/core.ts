@@ -1,7 +1,6 @@
 /// <reference lib="dom" />
 
-export const REACTIVE = Symbol("REACTIVE");
-export const NODE = Symbol("NODE");
+export const REACTIVE = Symbol();
 
 export type Cleanup = () => void;
 
@@ -20,11 +19,15 @@ export type Content = string | number | null | undefined;
 type JSXChild = JSXElement | Content | Reactive<Content>;
 type JSXChildArray = readonly JSXChild[];
 
-export type JSXProps = {
+export type ChildrenProp = {
   readonly children?: JSXChild | JSXChildArray;
 };
 
-export function Fragment(props: JSXProps): JSXElement {
+export type RefProp<T> = {
+  readonly ref?: ((instance: T) => void) | { set value(_: T) };
+};
+
+export function Fragment(props: ChildrenProp): JSXElement {
   const childElements = convertChildren(props);
   return function Fragment_element(parent) {
     for (const child of childElements) {
@@ -60,7 +63,7 @@ function convertChild(child: JSXChild): JSXElement {
   return typeof child === "function" ? child : textNode(child);
 }
 
-export function convertChildren(props: JSXProps): JSXElement[] {
+export function convertChildren(props: ChildrenProp): JSXElement[] {
   const { children } = props;
   let childElements: JSXElement[] = [];
   for (const child of children instanceof Array ? children : [children]) {
@@ -101,21 +104,31 @@ type IntrinsicElement<T extends Element> = ConvertIntrinsicProps<
   Omit<StripReadonly<StripMethods<T>>, "children">,
   T
 > &
-  JSXProps;
+  ChildrenProp &
+  RefProp<T>;
 
 export type IntrinsicElements = {
   [K in keyof AllElements]: IntrinsicElement<AllElements[K]>;
 };
+
+export function setRef<T>(props: RefProp<T>, value: T) {
+  const { ref } = props;
+  if (typeof ref === "function") {
+    ref(value);
+  } else if (ref) {
+    ref.value = value;
+  }
+}
 
 type BindingEntry = [string, Reactive<unknown>, Cleanup | null];
 export function createElement<T extends keyof IntrinsicElements>(
   type: T,
   props: IntrinsicElements[T],
 ): JSXElement {
-  const element = document.createElement(type);
+  const element = document.createElement(type) as AllElements[T];
   const bindings: BindingEntry[] = [];
   for (const key in props) {
-    if (key === "children") {
+    if (key === "children" || key === "ref") {
       continue;
     }
     const value = (props as any)[key];
@@ -125,6 +138,8 @@ export function createElement<T extends keyof IntrinsicElements>(
       (element as any)[key] = value;
     }
   }
+  setRef(props, element);
+  const children = convertChildren(props);
   return function jsxIntrinsic_element(parent) {
     element.remove();
     for (const b of bindings) {
@@ -134,7 +149,7 @@ export function createElement<T extends keyof IntrinsicElements>(
         (element as any)[key] = newValue;
       });
     }
-    for (const child of convertChildren(props)) {
+    for (const child of children) {
       child(element);
     }
     if (parent) {
