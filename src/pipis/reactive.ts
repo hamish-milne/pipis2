@@ -1,9 +1,11 @@
 import { type Reactive, REACTIVE } from "./core";
 
+/** A {@link Reactive} value with synchronous, always-up-to-date read access via `.value`. */
 export type ReactiveReadonly<T> = Reactive<T> & {
   get value(): T;
 };
 
+/** A {@link ReactiveReadonly} value that can also be written to via `.value`, notifying subscribers. */
 export type ReactiveState<T> = ReactiveReadonly<T> & {
   set value(newValue: T);
 };
@@ -45,6 +47,7 @@ class ReactiveStateImpl<T> implements ReactiveState<T> {
   }
 }
 
+/** Creates a simple, independently-writable {@link ReactiveState} value. */
 export function reactive<T>(initialValue: T): ReactiveState<T> {
   return new ReactiveStateImpl(initialValue);
 }
@@ -79,10 +82,12 @@ class ReactiveSelect<TIn, TOut> implements ReactiveReadonly<TOut> {
   }
 }
 
+/** Derives a read-only reactive value from `input` by applying `compute`, only notifying subscribers when the result actually changes. */
 export function select<TIn, TOut>(
   input: ReactiveReadonly<TIn>,
   compute: (input: TIn) => TOut,
 ): ReactiveReadonly<TOut>;
+/** Derives a read-only reactive value by selecting a single property key out of `input`. */
 export function select<TIn, TKey extends keyof TIn>(
   input: ReactiveReadonly<TIn>,
   key: TKey,
@@ -117,6 +122,7 @@ class ReactiveConstant<T> implements ReactiveReadonly<T> {
   }
 }
 
+/** Wraps a static value as a {@link ReactiveReadonly}, for APIs that require a reactive input. */
 export function constant<T>(value: T): ReactiveReadonly<T> {
   return new ReactiveConstant(value);
 }

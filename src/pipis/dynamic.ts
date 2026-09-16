@@ -10,6 +10,18 @@ import {
 } from "./core";
 import { constant, reactive, type ReactiveReadonly } from "./reactive";
 
+/**
+ * Builds a {@link JSXElement} whose content can change shape over time (be added, removed, or
+ * reordered) without breaking the fixed "head" contract that {@link JSXElement} requires.
+ *
+ * A persistent {@link createMarker marker} node is inserted once, immediately before the original
+ * `sibling`, before `mount` ever runs - so it's always the leftmost node of the region, and is
+ * always returned as this element's head, however its content changes later. `mount` is free to
+ * insert/move/remove real content anywhere between the marker and `sibling`.
+ *
+ * `mount` is only called once per mount (guarded with `cleanup ??=`), so subscribing inside it is
+ * safe even if the returned element's mount function is invoked again with the same parent.
+ */
 export function dynamic(
   mount: (parent: Node, sibling: Node | null) => Cleanup | void,
   unmount: () => void,
@@ -30,6 +42,7 @@ export function dynamic(
   };
 }
 
+/** Renders `count` items in sequence, adding or removing from the end as `count` changes. */
 export function Repeat({
   count,
   children,
@@ -61,6 +74,14 @@ export function Repeat({
   );
 }
 
+/**
+ * Renders items from an array, keyed by `itemKey` so items can be added, removed, and reordered
+ * without recreating unaffected items. Each item is (re-)mounted on every update by iterating
+ * back-to-front and chaining each item's returned head node as the next item's `sibling`; combined
+ * with {@link needsToMove}, an item only costs a real DOM operation when it actually moved.
+ * Iterating in reverse (rather than reusing the list's own `sibling` for every item) is what makes
+ * this exactly one DOM operation per item that changed position, regardless of update order.
+ */
 export function List<T>({
   items,
   itemKey,
@@ -105,6 +126,7 @@ export function List<T>({
   );
 }
 
+/** Mounts one of several elements, chosen by `selector`, unmounting the previous choice on change. */
 export function OneOf<T extends PropertyKey>({
   selector,
   children,
@@ -130,6 +152,11 @@ export function OneOf<T extends PropertyKey>({
   );
 }
 
+/**
+ * Renders content computed from a reactive value, fully recreating the DOM whenever it changes.
+ * Prefer {@link OneOf}, {@link List}, or {@link Repeat} where they fit; those update in place
+ * instead of throwing away and rebuilding the DOM on every change.
+ */
 export function Dynamic<T>({
   value,
   children,
@@ -155,6 +182,7 @@ export function Dynamic<T>({
   );
 }
 
+/** Renders nothing, but runs `fn` on mount and its returned cleanup (if any) on unmount. */
 export function effect(fn: () => Cleanup | undefined): JSXElement {
   let cleanup: Cleanup | undefined;
   return function Effect_element(parent, sibling = null) {
@@ -168,10 +196,12 @@ export function effect(fn: () => Cleanup | undefined): JSXElement {
   };
 }
 
+/** JSX-friendly wrapper around {@link effect}, for running a side effect on mount/unmount. */
 export function Effect(props: { children: () => Cleanup | undefined }): JSXElement {
   return effect(props.children);
 }
 
+/** Runs `children` with the current value on mount, and again on every subsequent change. */
 export function Watch<T>({
   value,
   children,
@@ -186,6 +216,11 @@ export function Watch<T>({
   });
 }
 
+/**
+ * Creates a context: a `[provider, consumer]` pair for passing a value down the component tree
+ * without threading it through every level of props. The consumer resolves to the nearest
+ * enclosing provider's value at the time the component is constructed.
+ */
 export function defineContext<T>(defaultValue: T) {
   const stack = [defaultValue];
   function context_provider<U>(value: T, inner: () => U): U {
@@ -202,6 +237,11 @@ export function defineContext<T>(defaultValue: T) {
   return [context_provider, context_consumer] as const;
 }
 
+/**
+ * Renders `children` (or `success`, if omitted) while `promise` is pending, `success` once it
+ * resolves, and `error` if it rejects. Does not offer timeout/retry/streaming; for that level of
+ * control, consider a dedicated data-fetching library layered on top.
+ */
 export function Suspense<T>({
   promise,
   placeholder,
@@ -250,6 +290,12 @@ export function Suspense<T>({
   });
 }
 
+/**
+ * Catches errors thrown synchronously while mounting `children` and renders `fallback` instead.
+ * Only covers the mount call itself - errors thrown later, e.g. from a reactive binding's
+ * subscriber callback or an {@link Effect}, are not caught. Use a global error handler (such as
+ * `window.onerror`) alongside a reactive flag for those cases.
+ */
 export function ErrorBoundary({
   children,
   fallback,
@@ -279,8 +325,13 @@ export function ErrorBoundary({
   );
 }
 
+/** The `[parent, sibling]` mount position captured by a {@link PortalTarget}, or `undefined` if it isn't mounted. */
 export type PortalTargetValue = readonly [Node, Node | null] | undefined;
 
+/**
+ * Marks a spot in the tree for a {@link Portal} to render into. Renders nothing itself; assign
+ * its position (via `ref`) to a reactive value and pass that to a `Portal`'s `target` prop.
+ */
 export function PortalTarget(props: RefProp<PortalTargetValue>): JSXElement {
   return function PortalTarget_element(parent, sibling = null) {
     setRef(props, parent ? [parent, sibling] : undefined);
@@ -288,6 +339,12 @@ export function PortalTarget(props: RefProp<PortalTargetValue>): JSXElement {
   };
 }
 
+/**
+ * Renders `children` into the position captured by a {@link PortalTarget}, wherever that is in
+ * the DOM. Since the captured position is a pair of live node references rather than a snapshot,
+ * this keeps working correctly even if the target is later moved (e.g. as part of a reordering
+ * {@link List}).
+ */
 export function Portal({
   target,
   children,
