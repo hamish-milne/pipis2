@@ -10,9 +10,8 @@ export type Component = keyof CoreIntrinsicElements | ((props: ChildrenProp) => 
 
 export type JSXKey = string | number | null;
 
-export function jsx(type: Component, props: ChildrenProp, key?: JSXKey): JSXElement {
-  return typeof type === "string" ? createElement(type, props) : type(props);
-}
+export const jsx = (type: Component, props: ChildrenProp): JSXElement =>
+  typeof type === "string" ? createElement(type, props) : type(props);
 
 export const jsxs = jsx;
 

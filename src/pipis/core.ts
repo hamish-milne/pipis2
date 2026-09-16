@@ -17,9 +17,8 @@ export type Reactive<T> = {
 };
 
 /** Runtime type guard for {@link Reactive} values, based on the {@link REACTIVE} brand. */
-export function isReactive<T>(value: unknown): value is Reactive<T> {
-  return (value as Reactive<T> | null)?.[REACTIVE] === true;
-}
+export const isReactive = <T>(value: unknown): value is Reactive<T> =>
+  (value as Reactive<T> | null)?.[REACTIVE] === true;
 
 /**
  * The result of a JSX expression: a function that mounts or unmounts a piece of DOM content.
@@ -87,13 +86,11 @@ export function Fragment(props: ChildrenProp): JSXElement {
  * what lets repeated mount calls - e.g. from {@link List} re-running on every update - cost a
  * single DOM operation only for items that actually moved.
  */
-export function needsToMove(
+export const needsToMove = (
   element: Node,
   parent: Node | undefined,
   sibling: Node | null,
-): boolean {
-  return element.parentNode != parent || element.nextSibling != sibling;
-}
+): boolean => element.parentNode != parent || element.nextSibling != sibling;
 
 function setText(node: Text, content: Content) {
   node.data = String(content ?? "");
@@ -130,9 +127,7 @@ function textNode(content: Content | Reactive<Content>): JSXElement {
  * elements whose content can change shape over time - mount the marker once as the element's
  * fixed head, and insert/remove/reorder actual content around it as needed.
  */
-export function createMarker(text: string = ""): Comment {
-  return document.createComment(text);
-}
+export const createMarker = (text: string = ""): Comment => document.createComment(text);
 
 /** Converts the `children` prop into an array of {@link JSXElement}s, wrapping any raw content in a text node. */
 export function convertChildren(props: ChildrenProp): JSXElement[] {

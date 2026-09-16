@@ -8,13 +8,11 @@ export type SourceInfo = {
   columnNumber: number;
 };
 
-export function jsxDEV(
+export const jsxDEV = (
   type: Component,
   props: ChildrenProp,
   key?: JSXKey,
   isStaticChildren?: boolean,
   source?: SourceInfo,
   self?: any,
-) {
-  return jsx(type, props, key);
-}
+) => jsx(type, props);

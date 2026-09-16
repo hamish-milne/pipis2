@@ -5,7 +5,7 @@ _pipis_ is a tiny front-end framework for building UIs in JSX — under 1KB, no 
 ## Why?
 
 - **Fast by default.** No vDOM, no diffing, no memoization to think about. Only the DOM nodes bound to changed state ever update.
-- **Under 1KB.** Ships almost nothing, and fully tree-shakeable. Your app's code is the bundle.
+- **Under 1KB.** Or if you import absolutely everything, under 2KB gzipped. Your app's code is the bundle.
 - **No hooks, no re-renders.** Components run once and return a function that mounts and unmounts them. No dependency arrays, no stale closures, no rules of hooks.
 - **Just functions.** An element is `(parent?: Element) => void`: call it with a node to mount, call it with nothing to unmount. Stack traces look normal. Nothing is hidden from you.
 - **Bring your own state.** Use the built-in `reactive` helper, or wire up Zustand, RxJS, or anything else with a `subscribe` method.

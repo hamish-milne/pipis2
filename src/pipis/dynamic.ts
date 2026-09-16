@@ -10,6 +10,7 @@ import {
 } from "./core";
 import { constant, reactive, type ReactiveReadonly } from "./reactive";
 
+type MountFn = (parent: Node, sibling: Node | null) => Cleanup | void;
 /**
  * Builds a {@link JSXElement} whose content can change shape over time (be added, removed, or
  * reordered) without breaking the fixed "head" contract that {@link JSXElement} requires.
@@ -22,10 +23,7 @@ import { constant, reactive, type ReactiveReadonly } from "./reactive";
  * `mount` is only called once per mount (guarded with `cleanup ??=`), so subscribing inside it is
  * safe even if the returned element's mount function is invoked again with the same parent.
  */
-export function dynamic(
-  mount: (parent: Node, sibling: Node | null) => Cleanup | void,
-  unmount: () => void,
-): JSXElement {
+export function dynamic(mount: MountFn, unmount: Cleanup): JSXElement {
   const marker = createMarker();
   let cleanup: Cleanup | void;
   return function Dynamic_element(parent, sibling = null) {
@@ -51,27 +49,24 @@ export function Repeat({
   children: (index: number) => JSXElement;
 }): JSXElement {
   const items: JSXElement[] = [];
-  return dynamic(
-    function Repeat_mount(parent, sibling) {
-      return count.subscribe(function Repeat_count(newLength) {
-        while (items.length > newLength) {
-          items.pop()?.();
-        }
-        while (items.length < newLength) {
-          const index = items.length;
-          const child = children(index);
-          items.push(child);
-          child(parent, sibling);
-        }
-      });
-    },
-    function Repeat_unmount() {
-      for (const item of items) {
-        item();
+  const Repeat_mount = (parent: Node, sibling: Node | null) =>
+    count.subscribe(function Repeat_count(newLength) {
+      while (items.length > newLength) {
+        items.pop()?.();
       }
-      items.length = 0;
-    },
-  );
+      while (items.length < newLength) {
+        const index = items.length;
+        const child = children(index);
+        items.push(child);
+        child(parent, sibling);
+      }
+    });
+  return dynamic(Repeat_mount, function Repeat_unmount() {
+    for (const item of items) {
+      item();
+    }
+    items.length = 0;
+  });
 }
 
 /**
@@ -92,38 +87,35 @@ export function List<T>({
   children: (item: T, index: number) => JSXElement;
 }): JSXElement {
   const renderedItems = new Map<PropertyKey, JSXElement>();
-  return dynamic(
-    function List_mount(parent, sibling) {
-      return items.subscribe(function List_items(newItems) {
-        const newKeys = newItems.map(itemKey);
-        for (const [key, item] of renderedItems) {
-          if (newKeys.indexOf(key) === -1) {
-            item?.();
-            renderedItems.delete(key);
-          }
+  const List_mount: MountFn = (parent, sibling) =>
+    items.subscribe(function List_items(newItems) {
+      const newKeys = newItems.map(itemKey);
+      for (const [key, item] of renderedItems) {
+        if (newKeys.indexOf(key) === -1) {
+          item?.();
+          renderedItems.delete(key);
         }
-        // Forward iteration also works (when passing in 'sibling' repeatedly), but that would cause
-        // every item to be moved to the end of the parent each update, even if its real position doesn't change.
-        let nextSibling = sibling;
-        for (let index = newItems.length - 1; index >= 0; index--) {
-          const item = newItems[index];
-          const k = newKeys[index];
-          let itemElement = renderedItems.get(k);
-          if (!itemElement) {
-            itemElement = children(item, index);
-            renderedItems.set(k, itemElement);
-          }
-          nextSibling = itemElement(parent, nextSibling);
-        }
-      });
-    },
-    function List_unmount() {
-      for (const [, item] of renderedItems) {
-        item();
       }
-      renderedItems.clear();
-    },
-  );
+      // Forward iteration also works (when passing in 'sibling' repeatedly), but that would cause
+      // every item to be moved to the end of the parent each update, even if its real position doesn't change.
+      let nextSibling = sibling;
+      for (let index = newItems.length - 1; index >= 0; index--) {
+        const item = newItems[index];
+        const k = newKeys[index];
+        let itemElement = renderedItems.get(k);
+        if (!itemElement) {
+          itemElement = children(item, index);
+          renderedItems.set(k, itemElement);
+        }
+        nextSibling = itemElement(parent, nextSibling);
+      }
+    });
+  return dynamic(List_mount, function List_unmount() {
+    for (const [, item] of renderedItems) {
+      item();
+    }
+    renderedItems.clear();
+  });
 }
 
 /** Mounts one of several elements, chosen by `selector`, unmounting the previous choice on change. */
@@ -135,21 +127,18 @@ export function OneOf<T extends PropertyKey>({
   children: Partial<Record<T, JSXElement>>;
 }): JSXElement {
   let current: JSXElement | undefined;
-  return dynamic(
-    function OneOf_mount(parent, sibling) {
-      return selector.subscribe(function OneOf_value(newValue) {
-        current?.();
-        current = children[newValue];
-        if (current && parent) {
-          current(parent, sibling);
-        }
-      });
-    },
-    function OneOf_unmount() {
+  const OneOf_mount: MountFn = (parent, sibling) =>
+    selector.subscribe(function OneOf_value(newValue) {
       current?.();
-      current = undefined;
-    },
-  );
+      current = children[newValue];
+      if (current && parent) {
+        current(parent, sibling);
+      }
+    });
+  return dynamic(OneOf_mount, function OneOf_unmount() {
+    current?.();
+    current = undefined;
+  });
 }
 
 /**
@@ -165,21 +154,18 @@ export function Dynamic<T>({
   children: (props: T) => JSXElement;
 }): JSXElement {
   let current: JSXElement | undefined;
-  return dynamic(
-    function Dynamic_mount(parent, sibling) {
-      return value.subscribe(function Dynamic_value(newValue) {
-        current?.();
-        current = children(newValue);
-        if (current && parent) {
-          current(parent, sibling);
-        }
-      });
-    },
-    function Dynamic_unmount() {
+  const Dynamic_mount: MountFn = (parent, sibling) =>
+    value.subscribe(function Dynamic_value(newValue) {
       current?.();
-      current = undefined;
-    },
-  );
+      current = children(newValue);
+      if (current && parent) {
+        current(parent, sibling);
+      }
+    });
+  return dynamic(Dynamic_mount, function Dynamic_unmount() {
+    current?.();
+    current = undefined;
+  });
 }
 
 /** Renders nothing, but runs `fn` on mount and its returned cleanup (if any) on unmount. */
@@ -197,9 +183,8 @@ export function effect(fn: () => Cleanup | undefined): JSXElement {
 }
 
 /** JSX-friendly wrapper around {@link effect}, for running a side effect on mount/unmount. */
-export function Effect(props: { children: () => Cleanup | undefined }): JSXElement {
-  return effect(props.children);
-}
+export const Effect = (props: { children: () => Cleanup | undefined }): JSXElement =>
+  effect(props.children);
 
 /** Runs `children` with the current value on mount, and again on every subsequent change. */
 export function Watch<T>({
@@ -209,11 +194,11 @@ export function Watch<T>({
   value: Reactive<T>;
   children: (newValue: T) => void;
 }): JSXElement {
-  return effect(function Watch_effect() {
-    return value.subscribe(function Watch_value(newValue) {
+  const Watch_effect = () =>
+    value.subscribe(function Watch_value(newValue) {
       children(newValue);
     });
-  });
+  return effect(Watch_effect);
 }
 
 /**
@@ -231,9 +216,7 @@ export function defineContext<T>(defaultValue: T) {
       stack.pop();
     }
   }
-  function context_consumer() {
-    return stack[stack.length - 1];
-  }
+  const context_consumer = () => stack[stack.length - 1];
   return [context_provider, context_consumer] as const;
 }
 
@@ -352,12 +335,12 @@ export function Portal({
   target: Reactive<PortalTargetValue>;
   children: JSXElement;
 }): JSXElement {
-  return effect(function Portal_effect() {
-    return target.subscribe(function Portal_target(newValue) {
+  const Portal_effect = () =>
+    target.subscribe(function Portal_target(newValue) {
       if (newValue) {
         const [parent, sibling] = newValue;
         children(parent, sibling);
       }
     });
-  });
+  return effect(Portal_effect);
 }

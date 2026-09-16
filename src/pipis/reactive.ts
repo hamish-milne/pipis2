@@ -48,9 +48,8 @@ class ReactiveStateImpl<T> implements ReactiveState<T> {
 }
 
 /** Creates a simple, independently-writable {@link ReactiveState} value. */
-export function reactive<T>(initialValue: T): ReactiveState<T> {
-  return new ReactiveStateImpl(initialValue);
-}
+export const reactive = <T>(initialValue: T): ReactiveState<T> =>
+  new ReactiveStateImpl(initialValue);
 
 const UNDEFINED = Symbol();
 
@@ -123,6 +122,4 @@ class ReactiveConstant<T> implements ReactiveReadonly<T> {
 }
 
 /** Wraps a static value as a {@link ReactiveReadonly}, for APIs that require a reactive input. */
-export function constant<T>(value: T): ReactiveReadonly<T> {
-  return new ReactiveConstant(value);
-}
+export const constant = <T>(value: T): ReactiveReadonly<T> => new ReactiveConstant(value);
