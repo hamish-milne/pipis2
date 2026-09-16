@@ -2,7 +2,15 @@
 /** @jsxImportSource ./pipis */
 
 import { select, reactive } from "./pipis/reactive";
-import { ErrorBoundary, Portal, PortalTarget, Repeat, Suspense } from "./pipis/dynamic";
+import {
+  ErrorBoundary,
+  List,
+  Portal,
+  PortalTarget,
+  Repeat,
+  Suspense,
+  type PortalTargetValue,
+} from "./pipis/dynamic";
 import type { JSXElement } from "./pipis/core";
 
 export function Counter() {
@@ -56,7 +64,7 @@ export function TodoApp() {
 }
 
 function PortalExample() {
-  const portalTarget = reactive<Element | undefined>(undefined);
+  const portalTarget = reactive<PortalTargetValue>(undefined);
 
   return (
     <>
@@ -101,14 +109,35 @@ function SuspenseExample() {
   );
 }
 
+function ListExample() {
+  const items = reactive<readonly string[]>(["Item 1", "Item 2", "Item 3"]);
+
+  // Insertion test: every 0.2s, add a new item to the list in a random position
+  setInterval(() => {
+    const newItem = `Item ${items.value.length + 1}`;
+    const index = Math.floor(Math.random() * (items.value.length + 1));
+    items.value = [...items.value.slice(0, index), newItem, ...items.value.slice(index)];
+    // items.value = [...items.value, newItem];
+  }, 1000);
+
+  return (
+    <ul>
+      <List items={items} itemKey={(item) => item}>
+        {(item, index) => <li>{item}</li>}
+      </List>
+    </ul>
+  );
+}
+
 export function Main() {
   return (
     <>
       <Counter />
       <TodoApp />
-      <PortalExample />
       <ErrorBoundaryExample />
+      <PortalExample />
       <SuspenseExample />
+      <ListExample />
     </>
   );
 }

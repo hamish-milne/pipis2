@@ -1,14 +1,34 @@
 import {
   type Cleanup,
   type JSXElement,
-  type ChildrenProp,
   type Reactive,
   Fragment,
   type RefProp,
   setRef,
   isReactive,
+  createMarker,
 } from "./core";
 import { constant, reactive, type ReactiveReadonly } from "./reactive";
+
+export function dynamic(
+  mount: (parent: Node, sibling: Node | null) => Cleanup | void,
+  unmount: () => void,
+): JSXElement {
+  const marker = createMarker();
+  let cleanup: Cleanup | void;
+  return function Dynamic_element(parent, sibling = null) {
+    if (parent) {
+      parent.insertBefore(marker, sibling);
+      cleanup ??= mount(parent, sibling);
+    } else {
+      unmount();
+      cleanup?.();
+      cleanup = undefined;
+      marker.remove();
+    }
+    return marker;
+  };
+}
 
 export function Repeat({
   count,
@@ -17,66 +37,72 @@ export function Repeat({
   count: Reactive<number>;
   children: (index: number) => JSXElement;
 }): JSXElement {
-  let cleanup: Cleanup | undefined;
   const items: JSXElement[] = [];
-  return function Repeat_element(parent) {
-    for (const item of items) {
-      item();
-    }
-    items.length = 0;
-    cleanup?.();
-    if (!parent) {
-      return;
-    }
-    cleanup = count.subscribe(function Repeat_count(newLength) {
-      while (items.length > newLength) {
-        items.pop()?.();
+  return dynamic(
+    function Repeat_mount(parent, sibling) {
+      return count.subscribe(function Repeat_count(newLength) {
+        while (items.length > newLength) {
+          items.pop()?.();
+        }
+        while (items.length < newLength) {
+          const index = items.length;
+          const child = children(index);
+          items.push(child);
+          child(parent, sibling);
+        }
+      });
+    },
+    function Repeat_unmount() {
+      for (const item of items) {
+        item();
       }
-      while (items.length < newLength) {
-        const index = items.length;
-        const child = children(index);
-        items.push(child);
-        child(parent);
-      }
-    });
-  };
+      items.length = 0;
+    },
+  );
 }
 
 export function List<T>({
   items,
-  key,
+  itemKey,
   children,
 }: {
   items: Reactive<readonly T[]>;
-  key: (item: T, index: number) => PropertyKey;
+  itemKey: (item: T, index: number) => PropertyKey;
   children: (item: T, index: number) => JSXElement;
 }): JSXElement {
-  let cleanup: Cleanup | undefined;
   const renderedItems = new Map<PropertyKey, JSXElement>();
-  return function List_element(parent) {
-    cleanup?.();
-    if (!parent) {
-      return;
-    }
-    cleanup = items.subscribe(function List_items(newItems) {
-      const newKeys = newItems.map(key);
-      for (const [key, item] of renderedItems) {
-        if (newKeys.indexOf(key) === -1) {
-          item?.();
-          renderedItems.delete(key);
+  return dynamic(
+    function List_mount(parent, sibling) {
+      return items.subscribe(function List_items(newItems) {
+        const newKeys = newItems.map(itemKey);
+        for (const [key, item] of renderedItems) {
+          if (newKeys.indexOf(key) === -1) {
+            item?.();
+            renderedItems.delete(key);
+          }
         }
-      }
-      for (let index = 0; index < newItems.length; index++) {
-        const item = newItems[index];
-        const k = key(item, index);
-        if (!renderedItems.has(k)) {
-          const child = children(item, index);
-          renderedItems.set(k, child);
-          child(parent);
+        // Forward iteration also works (when passing in 'sibling' repeatedly), but that would cause
+        // every item to be moved to the end of the parent each update, even if its real position doesn't change.
+        let nextSibling = sibling;
+        for (let index = newItems.length - 1; index >= 0; index--) {
+          const item = newItems[index];
+          const k = newKeys[index];
+          let itemElement = renderedItems.get(k);
+          if (!itemElement) {
+            itemElement = children(item, index);
+            renderedItems.set(k, itemElement);
+          }
+          nextSibling = itemElement(parent, nextSibling);
         }
+      });
+    },
+    function List_unmount() {
+      for (const [, item] of renderedItems) {
+        item();
       }
-    });
-  };
+      renderedItems.clear();
+    },
+  );
 }
 
 export function OneOf<T extends PropertyKey>({
@@ -86,18 +112,22 @@ export function OneOf<T extends PropertyKey>({
   selector: Reactive<T>;
   children: Partial<Record<T, JSXElement>>;
 }): JSXElement {
-  let cleanup: Cleanup | undefined;
   let current: JSXElement | undefined;
-  return function OneOf_element(parent) {
-    cleanup?.();
-    cleanup = selector.subscribe(function OneOf_value(newValue) {
+  return dynamic(
+    function OneOf_mount(parent, sibling) {
+      return selector.subscribe(function OneOf_value(newValue) {
+        current?.();
+        current = children[newValue];
+        if (current && parent) {
+          current(parent, sibling);
+        }
+      });
+    },
+    function OneOf_unmount() {
       current?.();
-      current = children[newValue];
-      if (current && parent) {
-        current(parent);
-      }
-    });
-  };
+      current = undefined;
+    },
+  );
 }
 
 export function Dynamic<T>({
@@ -107,18 +137,39 @@ export function Dynamic<T>({
   value: Reactive<T>;
   children: (props: T) => JSXElement;
 }): JSXElement {
-  let cleanup: Cleanup | undefined;
   let current: JSXElement | undefined;
-  return function Dynamic_element(parent) {
-    cleanup?.();
-    cleanup = value.subscribe(function Dynamic_value(newValue) {
+  return dynamic(
+    function Dynamic_mount(parent, sibling) {
+      return value.subscribe(function Dynamic_value(newValue) {
+        current?.();
+        current = children(newValue);
+        if (current && parent) {
+          current(parent, sibling);
+        }
+      });
+    },
+    function Dynamic_unmount() {
       current?.();
-      current = children(newValue);
-      if (current && parent) {
-        current(parent);
-      }
-    });
+      current = undefined;
+    },
+  );
+}
+
+export function effect(fn: () => Cleanup | undefined): JSXElement {
+  let cleanup: Cleanup | undefined;
+  return function Effect_element(parent, sibling = null) {
+    if (parent) {
+      cleanup ??= fn();
+    } else {
+      cleanup?.();
+      cleanup = undefined;
+    }
+    return sibling;
   };
+}
+
+export function Effect(props: { children: () => Cleanup | undefined }): JSXElement {
+  return effect(props.children);
 }
 
 export function Watch<T>({
@@ -128,21 +179,11 @@ export function Watch<T>({
   value: Reactive<T>;
   children: (newValue: T) => void;
 }): JSXElement {
-  let cleanup: Cleanup | undefined;
-  return function Watch_element() {
-    cleanup?.();
-    cleanup = value.subscribe(function Watch_value(newValue) {
+  return effect(function Watch_effect() {
+    return value.subscribe(function Watch_value(newValue) {
       children(newValue);
     });
-  };
-}
-
-export function Effect({ children }: { children: () => Cleanup | undefined }): JSXElement {
-  let cleanup: Cleanup | undefined;
-  return function Effect_element() {
-    cleanup?.();
-    cleanup = children();
-  };
+  });
 }
 
 export function defineContext<T>(defaultValue: T) {
@@ -218,19 +259,32 @@ export function ErrorBoundary({
 }): JSXElement {
   const errorValue = reactive<unknown>(undefined);
   const fallbackElement = fallback(errorValue);
-  return function ErrorBoundary_element(parent) {
-    try {
-      return children(parent);
-    } catch (err) {
-      errorValue.value = err;
-      return fallbackElement(parent);
-    }
-  };
+  return dynamic(
+    function ErrorBoundary_mount(parent, sibling = null) {
+      try {
+        children(parent, sibling);
+      } catch (err) {
+        errorValue.value = err;
+        try {
+          children();
+        } catch {}
+        fallbackElement(parent, sibling);
+      }
+    },
+    function ErrorBoundary_unmount() {
+      children();
+      fallbackElement();
+      errorValue.value = undefined;
+    },
+  );
 }
 
-export function PortalTarget(props: RefProp<Element | undefined>): JSXElement {
-  return function PortalTarget_element(parent) {
-    setRef(props, parent);
+export type PortalTargetValue = readonly [Node, Node | null] | undefined;
+
+export function PortalTarget(props: RefProp<PortalTargetValue>): JSXElement {
+  return function PortalTarget_element(parent, sibling = null) {
+    setRef(props, parent ? [parent, sibling] : undefined);
+    return sibling;
   };
 }
 
@@ -238,12 +292,15 @@ export function Portal({
   target,
   children,
 }: {
-  target: Reactive<Element | undefined>;
+  target: Reactive<PortalTargetValue>;
   children: JSXElement;
 }): JSXElement {
-  let cleanup: Cleanup | undefined;
-  return function Portal_element() {
-    cleanup?.();
-    cleanup = target.subscribe(children);
-  };
+  return effect(function Portal_effect() {
+    return target.subscribe(function Portal_target(newValue) {
+      if (newValue) {
+        const [parent, sibling] = newValue;
+        children(parent, sibling);
+      }
+    });
+  });
 }

@@ -13,7 +13,7 @@ export function isReactive<T>(value: unknown): value is Reactive<T> {
   return (value as Reactive<T> | null)?.[REACTIVE] === true;
 }
 
-export type JSXElement = (parent?: Element) => void;
+export type JSXElement = (parent?: Node, sibling?: Node | null) => Node | null;
 
 export type Content = string | number | null | undefined;
 type JSXChild = JSXElement | Content | Reactive<Content>;
@@ -27,13 +27,33 @@ export type RefProp<T> = {
   readonly ref?: ((instance: T) => void) | { set value(_: T) };
 };
 
+export const emptyElement: JSXElement = (parent, sibling = null) => sibling;
+
 export function Fragment(props: ChildrenProp): JSXElement {
-  const childElements = convertChildren(props);
-  return function Fragment_element(parent) {
-    for (const child of childElements) {
-      child(parent);
+  const { children } = props;
+  let childElements: JSXElement[] = [];
+  for (const child of children instanceof Array ? children : [children]) {
+    if (child != null) {
+      childElements.push(typeof child === "function" ? child : textNode(child));
     }
+  }
+  if (childElements.length <= 1) {
+    return childElements[0] ?? emptyElement;
+  }
+  return function Fragment_element(parent, sibling = null) {
+    for (let i = childElements.length - 1; i >= 0; i--) {
+      sibling = childElements[i](parent, sibling);
+    }
+    return sibling;
   };
+}
+
+export function needsToMove(
+  element: Node,
+  parent: Node | undefined,
+  sibling: Node | null,
+): boolean {
+  return element.parentNode != parent || element.nextSibling != sibling;
 }
 
 function setText(node: Text, content: Content) {
@@ -49,18 +69,25 @@ function textNode(content: Content | Reactive<Content>): JSXElement {
     setText(node, content);
   }
   let cleanup: Cleanup | undefined;
-  return function textNode_element(parent) {
-    node.remove();
-    cleanup?.();
-    cleanup = contentReactive?.subscribe(function textNode_binding(newValue) {
-      setText(node, newValue);
-    });
-    parent?.appendChild(node);
+  return function textNode_element(parent, sibling = null) {
+    if (needsToMove(node, parent, sibling)) {
+      if (parent) {
+        cleanup ??= contentReactive?.subscribe(function textNode_binding(newValue) {
+          setText(node, newValue);
+        });
+        parent.insertBefore(node, sibling);
+      } else {
+        node.remove();
+        cleanup?.();
+        cleanup = undefined;
+      }
+    }
+    return node;
   };
 }
 
-function convertChild(child: JSXChild): JSXElement {
-  return typeof child === "function" ? child : textNode(child);
+export function createMarker(text: string = ""): Comment {
+  return document.createComment(text);
 }
 
 export function convertChildren(props: ChildrenProp): JSXElement[] {
@@ -68,7 +95,7 @@ export function convertChildren(props: ChildrenProp): JSXElement[] {
   let childElements: JSXElement[] = [];
   for (const child of children instanceof Array ? children : [children]) {
     if (child != null) {
-      childElements.push(convertChild(child));
+      childElements.push(typeof child === "function" ? child : textNode(child));
     }
   }
   return childElements;
@@ -100,7 +127,7 @@ type ConvertIntrinsicProps<T, TTarget extends EventTarget> = {
 
 type AllElements = HTMLElementTagNameMap & SVGElementTagNameMap & MathMLElementTagNameMap;
 
-type IntrinsicElement<T extends Element> = ConvertIntrinsicProps<
+type IntrinsicElement<T extends Node> = ConvertIntrinsicProps<
   Omit<StripReadonly<StripMethods<T>>, "children">,
   T
 > &
@@ -139,21 +166,26 @@ export function createElement<T extends keyof IntrinsicElements>(
     }
   }
   setRef(props, element);
-  const children = convertChildren(props);
-  return function jsxIntrinsic_element(parent) {
-    element.remove();
-    for (const b of bindings) {
-      const [key, binding, cleanup] = b;
-      cleanup?.();
-      b[2] = binding.subscribe(function jsxIntrinsic_binding(newValue) {
-        (element as any)[key] = newValue;
-      });
+  const children = Fragment(props);
+  return function jsxIntrinsic_element(parent, sibling = null) {
+    if (needsToMove(element, parent, sibling)) {
+      children(element);
+      if (parent) {
+        for (const b of bindings) {
+          const [key] = b;
+          b[2] ??= b[1].subscribe(function jsxIntrinsic_binding(newValue) {
+            (element as any)[key] = newValue;
+          });
+        }
+        parent.insertBefore(element, sibling);
+      } else {
+        element.remove();
+        for (const b of bindings) {
+          b[2]?.();
+          b[2] = null;
+        }
+      }
     }
-    for (const child of children) {
-      child(element);
-    }
-    if (parent) {
-      parent.appendChild(element);
-    }
+    return element;
   };
 }
