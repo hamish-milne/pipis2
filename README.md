@@ -1,13 +1,14 @@
 # pipis
 
-_pipis_ is an ultra-lightweight framework for front-end web development. Write components in JSX, keep state in-line or bind to your favourite state management solution. Weighs less than 1KB.
+_pipis_ is a tiny front-end framework for building UIs in JSX — under 1KB, no virtual DOM, no build magic. Write components like you would in React, but state updates go straight to the DOM node that needs them, nothing else re-runs.
 
 ## Why?
 
-- **Performance by default**. No vDOM, no diffing, no memoization traps. Components update only when their bound state changes.
-- **Fully customizable**. Write your own element functions to directly interact with the DOM, and use them alongside conventional components.
-- **No hooks**. Component functions get called once, returning an element function that lasts as long as you need it.
-- **Extreme simplicity**. Elements are functions: pass a parent node to attach to the DOM, pass nothing to clean them up. Stack traces behave normally. No magic.
+- **Fast by default.** No vDOM, no diffing, no memoization to think about. Only the DOM nodes bound to changed state ever update.
+- **Under 1KB.** Ships almost nothing, and fully tree-shakeable. Your app's code is the bundle.
+- **No hooks, no re-renders.** Components run once and return a function that mounts and unmounts them. No dependency arrays, no stale closures, no rules of hooks.
+- **Just functions.** An element is `(parent?: Element) => void`: call it with a node to mount, call it with nothing to unmount. Stack traces look normal. Nothing is hidden from you.
+- **Bring your own state.** Use the built-in `reactive` helper, or wire up Zustand, RxJS, or anything else with a `subscribe` method.
 
 ## Getting Started
 
@@ -307,5 +308,81 @@ function App() {
   const divRef = reactive<HTMLElement | null>(null);
 
   return <div ref={divRef}>Hello, world!</div>;
+}
+```
+
+## Other utilities
+
+### Suspense
+
+The `Suspense` component allows you to declaratively handle loading, success, and error states for asynchronous data.
+
+```tsx
+function App() {
+  return (
+    <Suspense
+      promise={fetch("https://api.example.com/data").then((res) => res.text())}
+      placeholder=""
+      success={(value) => <div>Data: {value}</div>}
+      error={(err) => <div>Error: {String(err)}</div>}
+    >
+      <div>Loading...</div>
+    </Suspense>
+  );
+}
+```
+
+### Portal
+
+The `Portal` utility allows you to render a component's children into a different part of the DOM tree, specified by a target element. You can use `PortalTarget` to define the target element and `Portal` to render the children into that target.
+
+```tsx
+function App() {
+  const portalTarget = reactive<Element | undefined>(undefined);
+
+  return (
+    <>
+      <div>
+        <PortalTarget ref={portalTarget} />
+      </div>
+      <Portal target={portalTarget}>
+        <p>This will be rendered in the portal target</p>
+      </Portal>
+    </>
+  );
+}
+```
+
+### Error boundary
+
+The `ErrorBoundary` utility allows you to catch errors in the rendering of its children and display a fallback UI instead. You can provide a reactive error value to the fallback component.
+
+```tsx
+function App() {
+  return (
+    <ErrorBoundary fallback={(err) => <div>Error: {String(err)}</div>}>
+      <div>Content that may throw an error</div>
+    </ErrorBoundary>
+  );
+}
+```
+
+Note that this only catches errors occurring in the mount operation. To catch errors at construction time, just use a normal try/catch around the component function.
+
+Errors resulting from state updates or effects will not be caught by the `ErrorBoundary`. Depending on the application, these errors may or may not be recoverable. You can use the global error handler to detect if this has occurred and, if necessary, display an appropriate error message or take corrective action.
+
+```tsx
+function App() {
+  const appState = reactive("ok");
+  window.onerror = () => (appState.value = "error");
+
+  return (
+    <OneOf selector={appState}>
+      {{
+        ok: <div>Everything is fine</div>,
+        error: <div>An error occurred</div>,
+      }}
+    </OneOf>
+  );
 }
 ```

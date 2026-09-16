@@ -1,4 +1,14 @@
-import type { Cleanup, JSXElement, ChildrenProp, Reactive } from "./core";
+import {
+  type Cleanup,
+  type JSXElement,
+  type ChildrenProp,
+  type Reactive,
+  Fragment,
+  type RefProp,
+  setRef,
+  isReactive,
+} from "./core";
+import { constant, reactive, type ReactiveReadonly } from "./reactive";
 
 export function Repeat({
   count,
@@ -149,4 +159,91 @@ export function defineContext<T>(defaultValue: T) {
     return stack[stack.length - 1];
   }
   return [context_provider, context_consumer] as const;
+}
+
+export function Suspense<T>({
+  promise,
+  placeholder,
+  success,
+  error,
+  children,
+}: {
+  promise: Promise<T> | Reactive<Promise<T>>;
+  placeholder: T;
+  success: (value: ReactiveReadonly<T | undefined>) => JSXElement;
+  error?: (err: ReactiveReadonly<unknown>) => JSXElement;
+  children?: JSXElement;
+}): JSXElement {
+  const state = reactive<0 | 1 | 2>(0);
+  const successValue = reactive<T>(placeholder);
+  const errorValue = reactive<unknown>(undefined);
+  const successElement = success(successValue);
+
+  return Fragment({
+    children: [
+      Watch({
+        value: isReactive(promise) ? promise : constant(promise),
+        children: function Suspense_promise(newPromise) {
+          state.value = 0;
+          newPromise.then(
+            (value) => {
+              successValue.value = value;
+              state.value = 1;
+            },
+            (err) => {
+              errorValue.value = err;
+              state.value = 2;
+            },
+          );
+        },
+      }),
+      OneOf({
+        selector: state,
+        children: [
+          children ?? successElement,
+          successElement,
+          error?.(errorValue) ?? successElement,
+        ],
+      }),
+    ],
+  });
+}
+
+export function ErrorBoundary({
+  children,
+  fallback,
+}: {
+  children: JSXElement;
+  fallback: (err: ReactiveReadonly<unknown>) => JSXElement;
+}): JSXElement {
+  const errorValue = reactive<unknown>(undefined);
+  const fallbackElement = fallback(errorValue);
+  return function ErrorBoundary_element(parent) {
+    try {
+      return children(parent);
+    } catch (err) {
+      errorValue.value = err;
+      return fallbackElement(parent);
+    }
+  };
+}
+
+export function PortalTarget(props: RefProp<Element | undefined>): JSXElement {
+  return function PortalTarget_element(parent) {
+    setRef(props, parent);
+  };
+}
+
+export function Portal({
+  target,
+  children,
+}: {
+  target: Reactive<Element | undefined>;
+  children: JSXElement;
+}): JSXElement {
+  let cleanup: Cleanup | undefined;
+  return function Portal_element() {
+    cleanup?.();
+    cleanup = target.subscribe(children);
+  };
 }
