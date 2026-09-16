@@ -1,0 +1,27 @@
+import {
+  type JSXElement,
+  type JSXProps,
+  createElement,
+  type IntrinsicElements as CoreIntrinsicElements,
+} from "./core";
+export { Fragment } from "./core";
+
+export type Component = keyof CoreIntrinsicElements | ((props: JSXProps) => JSXElement);
+
+export type JSXKey = string | number | null;
+
+export function jsx(type: Component, props: JSXProps, key?: JSXKey): JSXElement {
+  return typeof type === "string" ? createElement(type, props) : type(props);
+}
+
+export const jsxs = jsx;
+
+const PLACEHOLDER = Symbol();
+export namespace JSX {
+  export type Element = JSXElement;
+  export type IntrinsicElements = CoreIntrinsicElements;
+  export interface IntrinsicAttributes {
+    // Needed to properly type-check children
+    readonly [PLACEHOLDER]?: unknown;
+  }
+}
