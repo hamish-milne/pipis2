@@ -68,8 +68,6 @@ export function WeatherApp() {
     theme.value = theme.value === "dark" ? "light" : "dark";
   }
 
-  // Suspense's success/error callbacks are typed for a value that may be missing, even though in
-  // practice they're only ever rendered once the promise has settled - see the '!' below.
   function weatherCard(weather: ReactiveReadonly<WeatherData>) {
     const info = select(weather, (w) => describeWeather(w.code));
     const temperature = select(weather, (w) => Math.round(w.temperature));
@@ -160,5 +158,3 @@ export function WeatherApp() {
     </div>
   );
 }
-
-WeatherApp()(document.body);

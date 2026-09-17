@@ -16,6 +16,7 @@ import {
   type ReactiveState,
   type JSXElement,
   Effect,
+  Helmet,
 } from "../pipis";
 
 const [withAccent, getAccent] = defineContext("text-green-400");
@@ -80,6 +81,9 @@ export function FeedbackApp() {
 
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-16 text-slate-100">
+      <Helmet>
+        <title>Feedback app</title>
+      </Helmet>
       {/* Rendered wherever it sits in the tree; the modal below portals into it regardless. */}
       <PortalTarget ref={portalTarget} />
 
@@ -149,5 +153,3 @@ export function FeedbackApp() {
     </div>
   );
 }
-
-FeedbackApp()(document.body);

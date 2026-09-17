@@ -147,5 +147,3 @@ export function TodoApp() {
     </div>
   );
 }
-
-TodoApp()(document.body);
