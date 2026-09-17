@@ -80,10 +80,12 @@ export function Fragment(props: ChildrenProp): JSXElement {
     return childElements[0] ?? emptyElement;
   }
   return function Fragment_element(parent, sibling = null, shadow) {
-    for (let i = childElements.length - 1; i >= 0; i--) {
-      sibling = childElements[i](parent, sibling, shadow);
+    let head: JSXSibling = sibling;
+    for (const child of childElements) {
+      const cHead = child(parent, sibling, shadow);
+      head ??= cHead;
     }
-    return sibling;
+    return head;
   };
 }
 
@@ -106,7 +108,10 @@ function setText(node: Text, content: Content) {
   node.data = String(content ?? "");
 }
 
-function textNode(content: Content | Reactive<Content>): JSXElement {
+/**
+ * Creates a text node that can reactively update its content if given a reactive value.
+ */
+export function textNode(content: Content | Reactive<Content>): JSXElement {
   const node = document.createTextNode("");
   let contentReactive: Reactive<Content> | undefined;
   if (isReactive(content)) {
@@ -172,7 +177,9 @@ type ConvertIntrinsicProps<T, TTarget extends EventTarget> = {
   [K in keyof T]?: ValueOrBinding<EventHandlerWithTarget<T[K], TTarget>>;
 };
 
-type AllElements = HTMLElementTagNameMap & SVGElementTagNameMap & MathMLElementTagNameMap;
+type AllElements = HTMLElementTagNameMap &
+  Omit<SVGElementTagNameMap, "a"> &
+  MathMLElementTagNameMap;
 
 type IntrinsicElement<T extends Node> = ConvertIntrinsicProps<StripReadonly<StripMethods<T>>, T> &
   ChildrenProp &
@@ -195,7 +202,14 @@ export function setRef<T>(props: RefProp<T>, value: T) {
 
 function setAttribute(element: HTMLOrSVGElement, key: string, value: any) {
   if (key.startsWith("data-")) {
-    element.dataset[key.slice(5)] = value === false ? null : value;
+    const { dataset } = element;
+    const name = key.slice(5);
+    // It's not enough to set the value to null/undefined; you have to actually delete the property
+    if (value == null || value === false) {
+      delete dataset[name];
+    } else {
+      dataset[name] = value;
+    }
   } else {
     (element as any)[key] = value;
   }

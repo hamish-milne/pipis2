@@ -7,7 +7,7 @@ _pipis_ is a tiny front-end framework for building UIs in JSX — under 1KB, no 
 - **Fast by default.** No vDOM, no diffing, no memoization to think about. Only the DOM nodes bound to changed state ever update.
 - **Under 1KB.** Or if you import absolutely everything, under 2KB gzipped. Your app's code is the bundle.
 - **No hooks, no re-renders.** Components run once and return a function that mounts and unmounts them. No dependency arrays, no stale closures, no rules of hooks.
-- **Just functions.** An element is `(parent?: Element) => void`: call it with a node to mount, call it with nothing to unmount. Stack traces look normal. Nothing is hidden from you.
+- **Just functions.** An element is a function that inserts its content into the DOM: call it with a parent node to mount, call it with nothing to unmount. Stack traces look normal. Nothing is hidden from you.
 - **Bring your own state.** Use the built-in `reactive` helper, or wire up Zustand, RxJS, or anything else with a `subscribe` method.
 
 ## Getting Started
@@ -59,7 +59,7 @@ App()(document.body);
 
 JSX works by transforming HTML-like syntax (`<foo bar={baz} />`) into function calls (`jsx("foo", { bar: baz })`). The first argument is either a string representing an HTML tag (if lowercase), or a function representing a custom component (if uppercase).
 
-The result of a JSX expression is a 'JSX Element', which can be anything you like. In _pipis_, it's a function with the signature `(parent?: Element) => void`. This function is responsible for rendering the element into the DOM when a parent is provided, and cleaning it up when called without a parent.
+The result of a JSX expression is a 'JSX Element', which can be anything you like. In _pipis_, it's a function with the signature `(parent?: Node, sibling?: Node | null, shadow?: true) => Node | null`. This function is responsible for rendering the element into the DOM when a parent is provided, and cleaning it up when called without a parent.
 
 For 'intrinsic' elements, a.k.a. HTML tags, _pipis_ creates and persists the corresponding DOM nodes and, on mount, binds any reactive values to the appropriate attributes or content. When the element is unmounted, the bindings are removed, allowing the GC to do its thing.
 

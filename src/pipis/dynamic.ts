@@ -341,10 +341,14 @@ export type PortalTargetValue = readonly [Node, Node | null] | undefined;
  * its position (via `ref`) to a reactive value and pass that to a `Portal`'s `target` prop.
  */
 export function PortalTarget(props: RefProp<PortalTargetValue>): JSXElement {
-  return function PortalTarget_element(parent, sibling = null, shadow) {
-    setRef(props, parent && !shadow ? [parent, sibling] : undefined);
-    return sibling;
-  };
+  return dynamic(
+    function PortalTarget_mount(parent, sibling = null) {
+      setRef(props, [parent, sibling]);
+    },
+    function PortalTarget_unmount() {
+      setRef(props, undefined);
+    },
+  );
 }
 
 /**
@@ -368,4 +372,21 @@ export function Portal({
       }
     });
   return effect(Portal_effect);
+}
+
+/**
+ * Renders its children into the document head.
+ */
+export function Helmet(props: ChildrenProp): JSXElement {
+  const children = Fragment(props);
+  return (parent, sibling = null, shadow) => {
+    if (parent && !shadow) {
+      const { head } = document;
+      // This ensures new Helmet children are inserted at the beginning, so they take priority.
+      children(head, head.firstChild);
+    } else {
+      children();
+    }
+    return sibling;
+  };
 }
