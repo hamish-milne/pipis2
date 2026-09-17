@@ -1,6 +1,8 @@
+/// <reference types="vite/client" />
 /** @jsxRuntime automatic */
 /** @jsxImportSource ./pipis */
 
+import "./samples/styles.css";
 import { select, reactive } from "./pipis/reactive";
 import {
   ErrorBoundary,
@@ -12,6 +14,9 @@ import {
   type PortalTargetValue,
 } from "./pipis/dynamic";
 import type { JSXElement } from "./pipis/core";
+import { Markdown, renderToken } from "./pipis/markdown";
+import readme from "../README.md?raw";
+import { HighlightJS } from "./pipis/highlight";
 
 export function Counter() {
   const count = reactive(0);
@@ -129,6 +134,26 @@ function ListExample() {
   );
 }
 
+function MarkdownExample() {
+  return (
+    <Markdown
+      content={readme}
+      renderer={(token) => {
+        switch (token.type) {
+          case "code":
+            return (
+              <pre>
+                <HighlightJS language={token.lang}>{token.text}</HighlightJS>
+              </pre>
+            );
+          default:
+            return renderToken(token);
+        }
+      }}
+    />
+  );
+}
+
 export function Main() {
   return (
     <>
@@ -138,6 +163,7 @@ export function Main() {
       <PortalExample />
       <SuspenseExample />
       <ListExample />
+      <MarkdownExample />
     </>
   );
 }
