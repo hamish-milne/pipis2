@@ -141,18 +141,6 @@ export function textNode(content: Content | Reactive<Content>): JSXElement {
  */
 export const createMarker = (text: string = ""): Comment => document.createComment(text);
 
-/** Converts the `children` prop into an array of {@link JSXElement}s, wrapping any raw content in a text node. */
-export function convertChildren(props: ChildrenProp): JSXElement[] {
-  const { children } = props;
-  let childElements: JSXElement[] = [];
-  for (const child of children instanceof Array ? children : [children]) {
-    if (child != null) {
-      childElements.push(typeof child === "function" ? child : textNode(child));
-    }
-  }
-  return childElements;
-}
-
 type StripReadonly<T> = {
   [K in keyof T as Equals<Pick<T, K>, Readonly<Pick<T, K>>> extends true ? never : K]: T[K];
 };
@@ -241,7 +229,7 @@ export function createElement<T extends keyof IntrinsicElements>(
   setRef(props, element);
   const children = Fragment(props);
   // Create the node hierarchy for the children in a detached state.
-  // This ensure that when the node is attached to the DOM for the first time
+  // This ensures that when the node is attached to the DOM for the first time
   // there's only a single insertBefore() operation on the live DOM.
   children(element, null, true);
   return function jsxIntrinsic_element(parent, sibling = null, shadow) {

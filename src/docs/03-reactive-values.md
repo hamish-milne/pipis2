@@ -1,0 +1,53 @@
+## Reactive bindings
+
+A reactive value is any object that satisfies the following interface:
+
+```ts
+interface Reactive<T> {
+  // A brand to identify reactive values at runtime
+  readonly [REACTIVE]: true;
+  // Subscribes to changes in the reactive value and returns a cleanup function to unsubscribe.
+  subscribe(callback: (newValue: T) => void): Cleanup;
+}
+```
+
+You can create simple reactive values using the `reactive` function provided by _pipis_. This returns an object with a `value` property that is both readable and writable, and automatically notifies subscribers when it changes.
+
+The `select` function allows you to create a derived reactive value based on an existing source value. You can either provide a function to compute the derived value, or a key to select a specific property from the input object.
+
+```ts
+const state = reactive({ count: 0 });
+state.value = { count: 1 };
+
+const count1 = select(state, (s) => s.count);
+const count2 = select(state, "count");
+```
+
+When you pass a reactive value as an attribute or child of an intrinsic element (a DOM node), _pipis_ will automatically subscribe to changes and update the DOM accordingly.
+
+In custom components, reactive values have no special handling - the props object is passed unmodified to the component function. There is no concept of 're-rendering'; instead, the reactive value is passed all the way down to the leaf components that actually use it. When a change is detected, only the parts of the DOM that depend on the reactive value are updated.
+
+When defining a prop, consider if you want the allowed value to be static (`T`), reactive (`Reactive<T>`), or either (`T | Reactive<T>`). You can check if a value is reactive at runtime with the `isReactive` function. A rule of thumb is to accept both if you're passing a value down the tree without inspecting it, otherwise defaulting to static unless you know the value can change dynamically.
+
+You can create custom reactive values by implementing the `Reactive<T>` interface, which allows binding values to an existing state management framework. For example, the Store object from `zustand/vanilla` already has a `subscribe` function, so all we need to do is set the `[REACTIVE]` property to `true`:
+
+```tsx
+import { createStore } from "zustand/vanilla";
+import { REACTIVE, select } from "pipis";
+
+const store = createStore((set) => ({
+  count: 0,
+  increment: () => set((state) => ({ count: state.count + 1 })),
+}));
+
+const reactiveStore = Object.assign(store, { [REACTIVE]: true });
+
+function App() {
+  return (
+    <div>
+      <p>Count: {select(reactiveStore, (s) => s.count)}</p>
+      <button onclick={store.increment}>Increment</button>
+    </div>
+  );
+}
+```
