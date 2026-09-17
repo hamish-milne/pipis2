@@ -20,6 +20,9 @@ export type Reactive<T> = {
 export const isReactive = <T>(value: unknown): value is Reactive<T> =>
   (value as Reactive<T> | null)?.[REACTIVE] === true;
 
+export type JSXParent = Node | undefined;
+export type JSXSibling = Node | null;
+
 /**
  * The result of a JSX expression: a function that mounts or unmounts a piece of DOM content.
  *
@@ -34,12 +37,15 @@ export const isReactive = <T>(value: unknown): value is Reactive<T> =>
  * subscriptions or effects. The return value is not meaningful in this mode.
  *
  * Calling mount again with the same `parent`/`sibling` (or moving to a different one) must be a
- * cheap, idempotent operation - see {@link needsToMove}.
+ * cheap, idempotent operation - see {@link moveNode}.
+ *
+ * If `shadow` is `true`, the element is not yet in the main DOM tree despite having a parent,
+ * so side-effects and subscriptions should be deferred.
  */
-export type JSXElement = (parent?: Node, sibling?: Node | null) => Node | null;
+export type JSXElement = (parent?: JSXParent, sibling?: JSXSibling, shadow?: true) => Node | null;
 
 /** A child that renders as a DOM text node: any other primitive value is stringified, `null`/`undefined` render as empty. */
-export type Content = string | number | null | undefined;
+export type Content = string | number | false | null | undefined;
 type JSXChild = JSXElement | Content | Reactive<Content>;
 type JSXChildArray = readonly JSXChild[];
 
@@ -50,7 +56,8 @@ export type ChildrenProp = {
 
 /** Props shape for the `ref` prop, accepted by every intrinsic element. */
 export type RefProp<T> = {
-  readonly ref?: ((instance: T) => void) | { set value(_: T) };
+  // `value` should be contravariant as it's write-only, but this isn't properly handled in TypeScript yet.
+  readonly ref?: ((instance: T) => void) | { set value(_: T | null | undefined) };
 };
 
 /** A {@link JSXElement} that renders nothing; on mount, returns `sibling` unchanged. */
@@ -65,32 +72,35 @@ export function Fragment(props: ChildrenProp): JSXElement {
   const { children } = props;
   let childElements: JSXElement[] = [];
   for (const child of children instanceof Array ? children : [children]) {
-    if (child != null) {
+    if (child != null && child !== false) {
       childElements.push(typeof child === "function" ? child : textNode(child));
     }
   }
   if (childElements.length <= 1) {
     return childElements[0] ?? emptyElement;
   }
-  return function Fragment_element(parent, sibling = null) {
+  return function Fragment_element(parent, sibling = null, shadow) {
     for (let i = childElements.length - 1; i >= 0; i--) {
-      sibling = childElements[i](parent, sibling);
+      sibling = childElements[i](parent, sibling, shadow);
     }
     return sibling;
   };
 }
 
 /**
- * Checks whether `element` is already positioned at `parent`/`sibling`, so a mount call can skip
- * the `insertBefore` (and any rebinding it would trigger) when nothing actually changed. This is
- * what lets repeated mount calls - e.g. from {@link List} re-running on every update - cost a
- * single DOM operation only for items that actually moved.
+ * Moves a node to a different position in the DOM, if needed.
  */
-export const needsToMove = (
-  element: Node,
-  parent: Node | undefined,
-  sibling: Node | null,
-): boolean => element.parentNode != parent || element.nextSibling != sibling;
+export function moveNode(element: ChildNode, parent: JSXParent, sibling: JSXSibling) {
+  if (element.parentNode != parent || element.nextSibling != sibling) {
+    if (parent) {
+      parent.insertBefore(element, sibling);
+    } else {
+      element.remove();
+    }
+    return true;
+  }
+  return false;
+}
 
 function setText(node: Text, content: Content) {
   node.data = String(content ?? "");
@@ -105,19 +115,16 @@ function textNode(content: Content | Reactive<Content>): JSXElement {
     setText(node, content);
   }
   let cleanup: Cleanup | undefined;
-  return function textNode_element(parent, sibling = null) {
-    if (needsToMove(node, parent, sibling)) {
-      if (parent) {
-        cleanup ??= contentReactive?.subscribe(function textNode_binding(newValue) {
-          setText(node, newValue);
-        });
-        parent.insertBefore(node, sibling);
-      } else {
-        node.remove();
-        cleanup?.();
-        cleanup = undefined;
-      }
+  return function textNode_element(parent, sibling = null, shadow) {
+    if (parent && !shadow) {
+      cleanup ??= contentReactive?.subscribe(function textNode_binding(newValue) {
+        setText(node, newValue);
+      });
+    } else {
+      cleanup?.();
+      cleanup = undefined;
     }
+    moveNode(node, parent, sibling);
     return node;
   };
 }
@@ -167,10 +174,7 @@ type ConvertIntrinsicProps<T, TTarget extends EventTarget> = {
 
 type AllElements = HTMLElementTagNameMap & SVGElementTagNameMap & MathMLElementTagNameMap;
 
-type IntrinsicElement<T extends Node> = ConvertIntrinsicProps<
-  Omit<StripReadonly<StripMethods<T>>, "children">,
-  T
-> &
+type IntrinsicElement<T extends Node> = ConvertIntrinsicProps<StripReadonly<StripMethods<T>>, T> &
   ChildrenProp &
   RefProp<T>;
 
@@ -186,6 +190,14 @@ export function setRef<T>(props: RefProp<T>, value: T) {
     ref(value);
   } else if (ref) {
     ref.value = value;
+  }
+}
+
+function setAttribute(element: HTMLOrSVGElement, key: string, value: any) {
+  if (key.startsWith("data-")) {
+    element.dataset[key.slice(5)] = value === false ? null : value;
+  } else {
+    (element as any)[key] = value;
   }
 }
 
@@ -209,29 +221,31 @@ export function createElement<T extends keyof IntrinsicElements>(
     if (isReactive(value)) {
       bindings.push([key, value, null]);
     } else {
-      (element as any)[key] = value;
+      setAttribute(element, key, value);
     }
   }
   setRef(props, element);
   const children = Fragment(props);
-  return function jsxIntrinsic_element(parent, sibling = null) {
-    if (needsToMove(element, parent, sibling)) {
+  // Create the node hierarchy for the children in a detached state.
+  // This ensure that when the node is attached to the DOM for the first time
+  // there's only a single insertBefore() operation on the live DOM.
+  children(element, null, true);
+  return function jsxIntrinsic_element(parent, sibling = null, shadow) {
+    moveNode(element, parent, sibling);
+    if (parent && !shadow) {
       children(element);
-      if (parent) {
-        for (const b of bindings) {
-          const [key] = b;
-          b[2] ??= b[1].subscribe(function jsxIntrinsic_binding(newValue) {
-            (element as any)[key] = newValue;
-          });
-        }
-        parent.insertBefore(element, sibling);
-      } else {
-        element.remove();
-        for (const b of bindings) {
-          b[2]?.();
-          b[2] = null;
-        }
+      for (const b of bindings) {
+        const [key] = b;
+        b[2] ??= b[1].subscribe(function jsxIntrinsic_binding(newValue) {
+          setAttribute(element, key, newValue);
+        });
       }
+    } else {
+      for (const b of bindings) {
+        b[2]?.();
+        b[2] = null;
+      }
+      children(element, null, true);
     }
     return element;
   };

@@ -99,7 +99,7 @@ function ErrorBoundaryExample() {
 function SuspenseExample() {
   return (
     <Suspense
-      promise={new Promise<string>((resolve) => setTimeout(() => resolve("Some data"), 2000))}
+      promise={() => new Promise<string>((resolve) => setTimeout(() => resolve("Some data"), 2000))}
       placeholder=""
       success={(data) => <p>Content loaded successfully: {data}</p>}
       error={(err) => <p>Error: {select(err, (e) => (e as Error)?.message ?? "Unknown error")}</p>}

@@ -12,12 +12,12 @@ export type ReactiveState<T> = ReactiveReadonly<T> & {
 
 class ReactiveStateImpl<T> implements ReactiveState<T> {
   declare [REACTIVE]: true;
-  declare private _s: ((newValue: T) => void)[];
+  declare private _s: Set<(newValue: T) => void>;
   declare private _v: T;
 
   constructor(initialValue: T) {
     this[REACTIVE] = true;
-    this._s = [];
+    this._s = new Set();
     this._v = initialValue;
   }
 
@@ -35,13 +35,10 @@ class ReactiveStateImpl<T> implements ReactiveState<T> {
   }
 
   subscribe(callback: (newValue: T) => void) {
-    this._s.push(callback);
+    this._s.add(callback);
     callback(this.value);
     const binding_cleanup = () => {
-      const index = this._s.indexOf(callback);
-      if (index !== -1) {
-        this._s.splice(index, 1);
-      }
+      this._s.delete(callback);
     };
     return binding_cleanup;
   }

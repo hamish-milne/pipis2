@@ -7,10 +7,14 @@ import {
   setRef,
   isReactive,
   createMarker,
+  moveNode,
+  type JSXParent,
+  type JSXSibling,
+  type ChildrenProp,
 } from "./core";
-import { constant, reactive, type ReactiveReadonly } from "./reactive";
+import { reactive, type ReactiveReadonly } from "./reactive";
 
-type MountFn = (parent: Node, sibling: Node | null) => Cleanup | void;
+type MountFn = (parent: Exclude<JSXParent, undefined>, sibling: JSXSibling) => Cleanup | void;
 /**
  * Builds a {@link JSXElement} whose content can change shape over time (be added, removed, or
  * reordered) without breaking the fixed "head" contract that {@link JSXElement} requires.
@@ -26,15 +30,16 @@ type MountFn = (parent: Node, sibling: Node | null) => Cleanup | void;
 export function dynamic(mount: MountFn, unmount: Cleanup): JSXElement {
   const marker = createMarker();
   let cleanup: Cleanup | void;
-  return function Dynamic_element(parent, sibling = null) {
-    if (parent) {
-      parent.insertBefore(marker, sibling);
-      cleanup ??= mount(parent, sibling);
-    } else {
-      unmount();
+  return function Dynamic_element(parent, sibling = null, shadow) {
+    if (moveNode(marker, parent, sibling) || (!cleanup && parent && !shadow)) {
+      // Either the node was moved, or it's visible in the DOM but hasn't been activated yet.
       cleanup?.();
-      cleanup = undefined;
-      marker.remove();
+      if (parent && !shadow) {
+        cleanup = mount(parent, sibling);
+      } else {
+        cleanup = undefined;
+        unmount();
+      }
     }
     return marker;
   };
@@ -49,7 +54,7 @@ export function Repeat({
   children: (index: number) => JSXElement;
 }): JSXElement {
   const items: JSXElement[] = [];
-  const Repeat_mount = (parent: Node, sibling: Node | null) =>
+  const Repeat_mount: MountFn = (parent, sibling) =>
     count.subscribe(function Repeat_count(newLength) {
       while (items.length > newLength) {
         items.pop()?.();
@@ -73,9 +78,7 @@ export function Repeat({
  * Renders items from an array, keyed by `itemKey` so items can be added, removed, and reordered
  * without recreating unaffected items. Each item is (re-)mounted on every update by iterating
  * back-to-front and chaining each item's returned head node as the next item's `sibling`; combined
- * with {@link needsToMove}, an item only costs a real DOM operation when it actually moved.
- * Iterating in reverse (rather than reusing the list's own `sibling` for every item) is what makes
- * this exactly one DOM operation per item that changed position, regardless of update order.
+ * with {@link moveNode}, an item only costs a real DOM operation when it actually moved.
  */
 export function List<T>({
   items,
@@ -141,6 +144,23 @@ export function OneOf<T extends PropertyKey>({
   });
 }
 
+/** Conditionally renders its child based on a boolean reactive value. */
+export function If({
+  condition,
+  ...props
+}: {
+  condition: Reactive<boolean>;
+} & ChildrenProp) {
+  const children = Fragment(props);
+  const If_mount: MountFn = (parent, sibling) =>
+    condition.subscribe(function If_value(newValue) {
+      children(newValue ? parent : undefined, sibling);
+    });
+  return dynamic(If_mount, function If_unmount() {
+    children();
+  });
+}
+
 /**
  * Renders content computed from a reactive value, fully recreating the DOM whenever it changes.
  * Prefer {@link OneOf}, {@link List}, or {@link Repeat} where they fit; those update in place
@@ -171,8 +191,8 @@ export function Dynamic<T>({
 /** Renders nothing, but runs `fn` on mount and its returned cleanup (if any) on unmount. */
 export function effect(fn: () => Cleanup | undefined): JSXElement {
   let cleanup: Cleanup | undefined;
-  return function Effect_element(parent, sibling = null) {
-    if (parent) {
+  return function Effect_element(parent, sibling = null, shadow) {
+    if (parent && !shadow) {
       cleanup ??= fn();
     } else {
       cleanup?.();
@@ -230,41 +250,46 @@ export function Suspense<T>({
   placeholder,
   success,
   error,
-  children,
+  ...props
 }: {
-  promise: Promise<T> | Reactive<Promise<T>>;
+  promise: (() => Promise<T>) | Reactive<Promise<T>>;
   placeholder: T;
-  success: (value: ReactiveReadonly<T | undefined>) => JSXElement;
+  success: (value: ReactiveReadonly<T>) => JSXElement;
   error?: (err: ReactiveReadonly<unknown>) => JSXElement;
-  children?: JSXElement;
-}): JSXElement {
+} & ChildrenProp): JSXElement {
   const state = reactive<0 | 1 | 2>(0);
   const successValue = reactive<T>(placeholder);
   const errorValue = reactive<unknown>(undefined);
   const successElement = success(successValue);
 
+  function Suspense_promise(newPromise: Promise<T>) {
+    state.value = 0;
+    newPromise.then(
+      (value) => {
+        successValue.value = value;
+        state.value = 1;
+      },
+      (err) => {
+        errorValue.value = err;
+        state.value = 2;
+      },
+    );
+  }
+
   return Fragment({
     children: [
-      Watch({
-        value: isReactive(promise) ? promise : constant(promise),
-        children: function Suspense_promise(newPromise) {
-          state.value = 0;
-          newPromise.then(
-            (value) => {
-              successValue.value = value;
-              state.value = 1;
-            },
-            (err) => {
-              errorValue.value = err;
-              state.value = 2;
-            },
-          );
-        },
-      }),
+      isReactive(promise)
+        ? Watch({
+            value: promise,
+            children: Suspense_promise,
+          })
+        : effect(function Suspense_onMount() {
+            Suspense_promise(promise());
+          }),
       OneOf({
         selector: state,
         children: [
-          children ?? successElement,
+          props.children ? Fragment(props) : successElement,
           successElement,
           error?.(errorValue) ?? successElement,
         ],
@@ -280,12 +305,12 @@ export function Suspense<T>({
  * `window.onerror`) alongside a reactive flag for those cases.
  */
 export function ErrorBoundary({
-  children,
   fallback,
+  ...props
 }: {
-  children: JSXElement;
   fallback: (err: ReactiveReadonly<unknown>) => JSXElement;
-}): JSXElement {
+} & ChildrenProp): JSXElement {
+  const children = Fragment(props);
   const errorValue = reactive<unknown>(undefined);
   const fallbackElement = fallback(errorValue);
   return dynamic(
@@ -316,8 +341,8 @@ export type PortalTargetValue = readonly [Node, Node | null] | undefined;
  * its position (via `ref`) to a reactive value and pass that to a `Portal`'s `target` prop.
  */
 export function PortalTarget(props: RefProp<PortalTargetValue>): JSXElement {
-  return function PortalTarget_element(parent, sibling = null) {
-    setRef(props, parent ? [parent, sibling] : undefined);
+  return function PortalTarget_element(parent, sibling = null, shadow) {
+    setRef(props, parent && !shadow ? [parent, sibling] : undefined);
     return sibling;
   };
 }
@@ -330,11 +355,11 @@ export function PortalTarget(props: RefProp<PortalTargetValue>): JSXElement {
  */
 export function Portal({
   target,
-  children,
+  ...props
 }: {
   target: Reactive<PortalTargetValue>;
-  children: JSXElement;
-}): JSXElement {
+} & ChildrenProp): JSXElement {
+  const children = Fragment(props);
   const Portal_effect = () =>
     target.subscribe(function Portal_target(newValue) {
       if (newValue) {
