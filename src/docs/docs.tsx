@@ -3,7 +3,7 @@
 /** @jsxImportSource ../pipis */
 
 import "../samples/styles.css";
-import { reactive, Watch, type JSXElement } from "../pipis";
+import { reactive, select, Effect, Watch, type JSXElement, type Reactive } from "../pipis";
 import { Markdown, renderToken, renderTokens, type MarkdownRenderer } from "../pipis/markdown";
 import { HighlightJS } from "../pipis/highlight";
 
@@ -34,18 +34,21 @@ function slugify(text: string) {
 
 type TocNode = { slug: string; label: string; depth: number; children: TocNode[] };
 
-function renderToc(nodes: TocNode[]): JSXElement {
+function renderToc(nodes: TocNode[], activeSlug: Reactive<string | undefined>): JSXElement {
   return (
     <ul className="space-y-1">
       {nodes.map((node) => (
-        <li>
+        <li className="has-data-active:[&>a]:font-medium has-data-active:[&>a]:text-indigo-300 dark:has-data-active:[&>a]:text-indigo-500 [&>a]:data-active:text-indigo-600 dark:[&>a]:data-active:text-indigo-400">
           <a
             href={`#${node.slug}`}
+            data-active={select(activeSlug, (slug) => slug === node.slug)}
             className="block truncate rounded-md px-2.5 py-1.5 text-sm text-slate-400 transition hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-500 dark:hover:bg-white/5 dark:hover:text-white"
           >
             {node.label}
           </a>
-          {node.children.length > 0 && <div className="pl-3">{renderToc(node.children)}</div>}
+          {node.children.length > 0 && (
+            <div className="pl-3">{renderToc(node.children, activeSlug)}</div>
+          )}
         </li>
       ))}
     </ul>
@@ -85,15 +88,58 @@ export function Docs() {
     tocStack.push(node);
   }
 
+  // Tracks which heading each block-level element "belongs to", to drive the active TOC entry
+  // below: an IntersectionObserver watches every block, and whichever intersecting one comes
+  // first in document order is considered the currently-read section.
+  const activeSlug = reactive<string | undefined>(undefined);
+  let currentHeadingSlug: string | undefined;
+  let blockCount = 0;
+  const blockInfo = new Map<Element, { slug: string; index: number }>();
+  const intersecting = new Set<Element>();
+  let observer: IntersectionObserver | undefined;
+
+  function onIntersect(entries: IntersectionObserverEntry[]) {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        intersecting.add(entry.target);
+      } else {
+        intersecting.delete(entry.target);
+      }
+    }
+    let best: { slug: string; index: number } | undefined;
+    for (const el of intersecting) {
+      const info = blockInfo.get(el)!;
+      if (!best || info.index < best.index) {
+        best = info;
+      }
+    }
+    if (best) {
+      activeSlug.value = best.slug;
+    }
+  }
+
+  function trackBlock(el: Element) {
+    if (!currentHeadingSlug) {
+      return;
+    }
+    blockInfo.set(el, { slug: currentHeadingSlug, index: blockCount++ });
+    // Only count a block as "active" while it's within the top 30% of the viewport.
+    // The top offset is to account for the fixed header height.
+    observer ??= new IntersectionObserver(onIntersect, { rootMargin: "-70px 0px -70% 0px" });
+    observer.observe(el);
+  }
+
   const docsRenderer: MarkdownRenderer = (token) => {
     switch (token.type) {
       case "heading": {
         const label = token.text.replace(/[`*_]/g, "");
         const slug = headingSlug(label);
         addTocEntry(token.depth, slug, label);
+        currentHeadingSlug = slug;
         return token.depth === 3 ? (
           <h3
             id={slug}
+            ref={trackBlock}
             className="mt-8 scroll-mt-24 text-lg font-semibold text-slate-800 dark:text-slate-100"
           >
             {renderTokens(token, docsRenderer)}
@@ -101,6 +147,7 @@ export function Docs() {
         ) : (
           <h2
             id={slug}
+            ref={trackBlock}
             className="mt-12 scroll-mt-24 border-b border-slate-200 pb-3 text-2xl font-semibold tracking-tight text-slate-900 first:mt-0 dark:border-white/10 dark:text-white"
           >
             {renderTokens(token, docsRenderer)}
@@ -109,18 +156,27 @@ export function Docs() {
       }
       case "paragraph":
         return (
-          <p className="mb-4 text-[15px] leading-7 text-slate-600 dark:text-slate-300">
+          <p
+            ref={trackBlock}
+            className="mb-4 text-[15px] leading-7 text-slate-600 dark:text-slate-300"
+          >
             {renderTokens(token, docsRenderer)}
           </p>
         );
       case "list": {
         const items = renderTokens({ tokens: token.items }, docsRenderer);
         return token.ordered ? (
-          <ol className="mb-4 list-decimal space-y-1.5 pl-6 text-[15px] leading-7 text-slate-600 marker:font-medium marker:text-indigo-500 dark:text-slate-300 dark:marker:text-indigo-400">
+          <ol
+            ref={trackBlock}
+            className="mb-4 list-decimal space-y-1.5 pl-6 text-[15px] leading-7 text-slate-600 marker:font-medium marker:text-indigo-500 dark:text-slate-300 dark:marker:text-indigo-400"
+          >
             {items}
           </ol>
         ) : (
-          <ul className="mb-4 list-disc space-y-1.5 pl-6 text-[15px] leading-7 text-slate-600 marker:text-indigo-500 dark:text-slate-300 dark:marker:text-indigo-400">
+          <ul
+            ref={trackBlock}
+            className="mb-4 list-disc space-y-1.5 pl-6 text-[15px] leading-7 text-slate-600 marker:text-indigo-500 dark:text-slate-300 dark:marker:text-indigo-400"
+          >
             {items}
           </ul>
         );
@@ -150,7 +206,10 @@ export function Docs() {
       case "code":
         return (
           // Always dark, regardless of site theme, to match the (dark-only) highlight.js theme.
-          <div className="mb-4 overflow-hidden rounded-xl bg-slate-900 ring-1 ring-white/10 scheme-dark">
+          <div
+            ref={trackBlock}
+            className="mb-4 overflow-hidden rounded-xl bg-slate-900 ring-1 ring-white/10 scheme-dark"
+          >
             {token.lang && (
               <div className="border-b border-white/10 px-4 py-1.5 font-mono text-xs text-slate-400">
                 {token.lang}
@@ -168,7 +227,7 @@ export function Docs() {
 
   // Built before the sidebar below, so the TOC tree is fully populated by the time it's drawn.
   const article = <Markdown content={content} renderer={docsRenderer} />;
-  const toc = renderToc(tocRoot);
+  const toc = renderToc(tocRoot, activeSlug);
 
   return (
     <div
@@ -176,6 +235,7 @@ export function Docs() {
       data-theme={theme}
     >
       <Watch value={theme}>{(value) => localStorage.setItem("docs-theme", value)}</Watch>
+      <Effect>{() => () => observer?.disconnect()}</Effect>
 
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/80 backdrop-blur dark:border-white/10 dark:bg-slate-950/80">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
