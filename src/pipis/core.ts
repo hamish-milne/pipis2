@@ -16,6 +16,13 @@ export type Reactive<T> = {
   subscribe(callback: (newValue: T) => void): Cleanup;
 };
 
+/** An alternative to directly calling `subscribe` on a {@link Reactive} value, purely to optimize bundle size. */
+export function subscribe<T>(reactive: Reactive<T>, callback: (value: T) => void) {
+  return reactive.subscribe(callback);
+}
+
+export type MaybeReactive<T> = Reactive<T> | T;
+
 /** Runtime type guard for {@link Reactive} values, based on the {@link REACTIVE} brand. */
 export const isReactive = <T>(value: unknown): value is Reactive<T> =>
   (value as Reactive<T> | null)?.[REACTIVE] === true;
@@ -63,27 +70,35 @@ export type RefProp<T> = {
 /** A {@link JSXElement} that renders nothing; on mount, returns `sibling` unchanged. */
 export const emptyElement: JSXElement = (parent, sibling = null) => sibling;
 
-/**
- * Renders a `<>...</>` fragment: a sequence of children with no wrapping DOM node.
- * Collapses to the child itself (or {@link emptyElement}) when there are 0 or 1 children,
- * so it adds no overhead - and no extra stack frame - for the common case.
- */
-export function Fragment(props: ChildrenProp): JSXElement {
-  const { children } = props;
+export function normalizeChildren(children: JSXChild | JSXChildArray): JSXElement[] {
   let childElements: JSXElement[] = [];
   for (const child of children instanceof Array ? children : [children]) {
     if (child != null && child !== false) {
       childElements.push(typeof child === "function" ? child : textNode(child));
     }
   }
+  childElements.reverse();
+  return childElements;
+}
+
+/**
+ * Renders a `<>...</>` fragment: a sequence of children with no wrapping DOM node.
+ * Collapses to the child itself (or {@link emptyElement}) when there are 0 or 1 children,
+ * so it adds no overhead - and no extra stack frame - for the common case.
+ *
+ * Because of these optimizations, Fragments only support a static list of children. If
+ * the structure should be dynamic, consider {@link List}, {@link ReactiveChildren}, or other
+ * dynamic rendering utilities.
+ */
+export function Fragment(props: ChildrenProp): JSXElement {
+  const childElements = normalizeChildren(props.children);
   if (childElements.length <= 1) {
     return childElements[0] ?? emptyElement;
   }
   return function Fragment_element(parent, sibling = null, shadow) {
-    let head: JSXSibling = sibling;
+    let head = sibling;
     for (const child of childElements) {
-      const cHead = child(parent, sibling, shadow);
-      head ??= cHead;
+      head = child(parent, head, shadow);
     }
     return head;
   };
@@ -122,15 +137,17 @@ export function textNode(content: Content | Reactive<Content>): JSXElement {
   let cleanup: Cleanup | undefined;
   return function textNode_element(parent, sibling = null, shadow) {
     if (parent && !shadow) {
-      cleanup ??= contentReactive?.subscribe(function textNode_binding(newValue) {
-        setText(node, newValue);
-      });
+      cleanup ??=
+        contentReactive &&
+        subscribe(contentReactive, function textNode_binding(newValue) {
+          setText(node, newValue);
+        });
     } else {
       cleanup?.();
       cleanup = undefined;
     }
     moveNode(node, parent, sibling);
-    return node;
+    return parent ? node : sibling;
   };
 }
 
@@ -238,7 +255,7 @@ export function createElement<T extends keyof IntrinsicElements>(
       children(element);
       for (const b of bindings) {
         const [key] = b;
-        b[2] ??= b[1].subscribe(function jsxIntrinsic_binding(newValue) {
+        b[2] ??= subscribe(b[1], function jsxIntrinsic_binding(newValue) {
           setAttribute(element, key, newValue);
         });
       }
@@ -249,6 +266,6 @@ export function createElement<T extends keyof IntrinsicElements>(
       }
       children(element, null, true);
     }
-    return element;
+    return parent ? element : sibling;
   };
 }

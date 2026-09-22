@@ -77,8 +77,8 @@ To get a reference to a DOM node, you can use the `ref` prop. The `ref` can be e
 
 ```tsx
 function App() {
-  const divRef = reactive<HTMLElement | null>(null);
+  let divRef: HTMLElement | undefined;
 
-  return <div ref={divRef}>Hello, world!</div>;
+  return <div ref={(x) => (divRef = x)}>Hello, world!</div>;
 }
 ```

@@ -69,7 +69,7 @@ export function TodoApp() {
 }
 
 function PortalExample() {
-  const portalTarget = reactive<PortalTargetValue>(undefined);
+  const portalTarget = reactive<PortalTargetValue>();
 
   return (
     <>
@@ -153,6 +153,28 @@ function MarkdownExample() {
     />
   );
 }
+
+function classComponent<T>(clazz: { new (props: Partial<T>): { element: JSXElement } }) {
+  return (props: Partial<T>): JSXElement => {
+    const instance = new clazz(props);
+    return instance.element.bind(instance);
+  };
+}
+
+class _ClassTest {
+  constructor(props: Partial<_ClassTest>) {
+    Object.assign(this, props);
+  }
+
+  foo = 1;
+  bar = "abc";
+  element = (
+    <div>
+      {this.foo} - {this.bar}
+    </div>
+  );
+}
+const ClassTest = classComponent(_ClassTest);
 
 export function Main() {
   return (

@@ -11,8 +11,16 @@ import {
   type JSXParent,
   type JSXSibling,
   type ChildrenProp,
+  normalizeChildren,
 } from "./core";
-import { reactive, type ReactiveReadonly } from "./reactive";
+import {
+  handleError,
+  reactive,
+  select,
+  subscribeWithCatch,
+  withErrorHandler,
+  type ReactiveReadonly,
+} from "./reactive";
 
 type MountFn = (parent: Exclude<JSXParent, undefined>, sibling: JSXSibling) => Cleanup | void;
 /**
@@ -41,7 +49,7 @@ export function dynamic(mount: MountFn, unmount: Cleanup): JSXElement {
         unmount();
       }
     }
-    return marker;
+    return parent ? marker : sibling;
   };
 }
 
@@ -55,15 +63,22 @@ export function Repeat({
 }): JSXElement {
   const items: JSXElement[] = [];
   const Repeat_mount: MountFn = (parent, sibling) =>
-    count.subscribe(function Repeat_count(newLength) {
+    subscribeWithCatch(count, function Repeat_count(newLength) {
+      // Remove excess items from the end of the list
       while (items.length > newLength) {
         items.pop()?.();
       }
-      while (items.length < newLength) {
-        const index = items.length;
-        const child = children(index);
+      let head = sibling;
+      // Add new items to the end of the list, adding the higher index to the RHS, so the end result is in the natural order.
+      let i = newLength - 1;
+      for (const j = items.length; i > j; i--) {
+        const child = children(items.length);
         items.push(child);
-        child(parent, sibling);
+        head = child(parent, head);
+      }
+      // Set the RHS of the existing items to the LHS of the newly added items.
+      for (; i >= 0; i--) {
+        head = items[i](parent, head);
       }
     });
   return dynamic(Repeat_mount, function Repeat_unmount() {
@@ -91,7 +106,7 @@ export function List<T>({
 }): JSXElement {
   const renderedItems = new Map<PropertyKey, JSXElement>();
   const List_mount: MountFn = (parent, sibling) =>
-    items.subscribe(function List_items(newItems) {
+    subscribeWithCatch(items, function List_items(newItems) {
       const newKeys = newItems.map(itemKey);
       for (const [key, item] of renderedItems) {
         if (newKeys.indexOf(key) === -1) {
@@ -99,9 +114,7 @@ export function List<T>({
           renderedItems.delete(key);
         }
       }
-      // Forward iteration also works (when passing in 'sibling' repeatedly), but that would cause
-      // every item to be moved to the end of the parent each update, even if its real position doesn't change.
-      let nextSibling = sibling;
+      let head = sibling;
       for (let index = newItems.length - 1; index >= 0; index--) {
         const item = newItems[index];
         const k = newKeys[index];
@@ -110,7 +123,7 @@ export function List<T>({
           itemElement = children(item, index);
           renderedItems.set(k, itemElement);
         }
-        nextSibling = itemElement(parent, nextSibling);
+        head = itemElement(parent, head);
       }
     });
   return dynamic(List_mount, function List_unmount() {
@@ -131,7 +144,7 @@ export function OneOf<T extends PropertyKey>({
 }): JSXElement {
   let current: JSXElement | undefined;
   const OneOf_mount: MountFn = (parent, sibling) =>
-    selector.subscribe(function OneOf_value(newValue) {
+    subscribeWithCatch(selector, function OneOf_value(newValue) {
       current?.();
       current = children[newValue];
       if (current && parent) {
@@ -153,7 +166,7 @@ export function If({
 } & ChildrenProp) {
   const children = Fragment(props);
   const If_mount: MountFn = (parent, sibling) =>
-    condition.subscribe(function If_value(newValue) {
+    subscribeWithCatch(condition, function If_value(newValue) {
       children(newValue ? parent : undefined, sibling);
     });
   return dynamic(If_mount, function If_unmount() {
@@ -175,7 +188,7 @@ export function Dynamic<T>({
 }): JSXElement {
   let current: JSXElement | undefined;
   const Dynamic_mount: MountFn = (parent, sibling) =>
-    value.subscribe(function Dynamic_value(newValue) {
+    subscribeWithCatch(value, function Dynamic_value(newValue) {
       current?.();
       current = children(newValue);
       if (current && parent) {
@@ -191,9 +204,10 @@ export function Dynamic<T>({
 /** Renders nothing, but runs `fn` on mount and its returned cleanup (if any) on unmount. */
 export function effect(fn: () => Cleanup | undefined): JSXElement {
   let cleanup: Cleanup | undefined;
+  const fnWrapped = handleError(fn);
   return function Effect_element(parent, sibling = null, shadow) {
     if (parent && !shadow) {
-      cleanup ??= fn();
+      cleanup ??= fnWrapped();
     } else {
       cleanup?.();
       cleanup = undefined;
@@ -215,29 +229,10 @@ export function Watch<T>({
   children: (newValue: T) => void;
 }): JSXElement {
   const Watch_effect = () =>
-    value.subscribe(function Watch_value(newValue) {
+    subscribeWithCatch(value, function Watch_value(newValue) {
       children(newValue);
     });
   return effect(Watch_effect);
-}
-
-/**
- * Creates a context: a `[provider, consumer]` pair for passing a value down the component tree
- * without threading it through every level of props. The consumer resolves to the nearest
- * enclosing provider's value at the time the component is constructed.
- */
-export function defineContext<T>(defaultValue: T) {
-  const stack = [defaultValue];
-  function context_provider<U>(value: T, inner: () => U): U {
-    stack.push(value);
-    try {
-      return inner();
-    } finally {
-      stack.pop();
-    }
-  }
-  const context_consumer = () => stack[stack.length - 1];
-  return [context_provider, context_consumer] as const;
 }
 
 /**
@@ -259,7 +254,7 @@ export function Suspense<T>({
 } & ChildrenProp): JSXElement {
   const state = reactive<0 | 1 | 2>(0);
   const successValue = reactive<T>(placeholder);
-  const errorValue = reactive<unknown>(undefined);
+  const errorValue = reactive<unknown>();
   const successElement = success(successValue);
 
   function Suspense_promise(newPromise: Promise<T>) {
@@ -311,26 +306,15 @@ export function ErrorBoundary({
   fallback: (err: ReactiveReadonly<unknown>) => JSXElement;
 } & ChildrenProp): JSXElement {
   const children = Fragment(props);
-  const errorValue = reactive<unknown>(undefined);
-  const fallbackElement = fallback(errorValue);
-  return dynamic(
-    function ErrorBoundary_mount(parent, sibling = null) {
-      try {
-        children(parent, sibling);
-      } catch (err) {
-        errorValue.value = err;
-        try {
-          children();
-        } catch {}
-        fallbackElement(parent, sibling);
-      }
-    },
-    function ErrorBoundary_unmount() {
-      children();
-      fallbackElement();
-      errorValue.value = undefined;
-    },
-  );
+  const errorValue = reactive<unknown>();
+  const ErrorBoundary_construct = () =>
+    OneOf({
+      selector: select(errorValue, (x) => (x == null ? 0 : 1)),
+      children: [children, fallback(errorValue)],
+    });
+  return withErrorHandler(function ErrorBoundary_onError(err) {
+    errorValue.value = err;
+  }, ErrorBoundary_construct);
 }
 
 /** The `[parent, sibling]` mount position captured by a {@link PortalTarget}, or `undefined` if it isn't mounted. */
@@ -342,7 +326,7 @@ export type PortalTargetValue = readonly [Node, Node | null] | undefined;
  */
 export function PortalTarget(props: RefProp<PortalTargetValue>): JSXElement {
   return dynamic(
-    function PortalTarget_mount(parent, sibling = null) {
+    function PortalTarget_mount(parent, sibling) {
       setRef(props, [parent, sibling]);
     },
     function PortalTarget_unmount() {
@@ -365,7 +349,7 @@ export function Portal({
 } & ChildrenProp): JSXElement {
   const children = Fragment(props);
   const Portal_effect = () =>
-    target.subscribe(function Portal_target(newValue) {
+    subscribeWithCatch(target, function Portal_target(newValue) {
       if (newValue) {
         const [parent, sibling] = newValue;
         children(parent, sibling);
@@ -379,7 +363,7 @@ export function Portal({
  */
 export function Helmet(props: ChildrenProp): JSXElement {
   const children = Fragment(props);
-  return (parent, sibling = null, shadow) => {
+  return function Helmet_element(parent, sibling = null, shadow) {
     if (parent && !shadow) {
       const { head } = document;
       // This ensures new Helmet children are inserted at the beginning, so they take priority.
@@ -389,4 +373,50 @@ export function Helmet(props: ChildrenProp): JSXElement {
     }
     return sibling;
   };
+}
+
+/**
+ * Renders its children reactively, updating the DOM whenever the reactive `children` value
+ * changes. Changed children are mounted/unmounted from the right-hand side of the node list.
+ * Children at the start of the array are re-used where possible; for full re-ordering support
+ * consider {@link List}.
+ */
+export function ReactiveChildren({
+  children,
+}: {
+  children: Reactive<ChildrenProp["children"]>;
+}): JSXElement {
+  let previous: JSXElement[] = [];
+  let head: JSXSibling = null;
+
+  return dynamic(
+    function ReactiveChildren_mount(parent, sibling) {
+      head = sibling;
+      return subscribeWithCatch(children, function ReactiveChildren_update(newValue) {
+        const next = normalizeChildren(newValue);
+        const prevLength = previous.length;
+        const newLength = next.length;
+        let prefix: number;
+        for (
+          prefix = 0;
+          prefix < prevLength && prefix < newLength && previous[prefix] === next[prefix];
+          prefix++
+        );
+        for (let i = prevLength - 1; i >= prefix; i--) {
+          head = previous[i]();
+        }
+        for (let i = prefix; i < newLength; i++) {
+          head = next[i](parent, head);
+        }
+        previous = next;
+      });
+    },
+    function ReactiveChildren_unmount() {
+      for (const child of previous) {
+        child();
+      }
+      previous = [];
+      head = null;
+    },
+  );
 }

@@ -66,12 +66,12 @@ function crashTestPanel(crash: boolean) {
 }
 
 export function FeedbackApp() {
-  const portalTarget = reactive<PortalTargetValue>(undefined);
+  const portalTarget = reactive<PortalTargetValue>();
   const rating = reactive(0);
   const comment = reactive("");
   const modalOpen = reactive(false);
   const crashTest = reactive(false);
-  const commentBox = reactive<HTMLTextAreaElement | null>(null);
+  const commentBox = reactive<HTMLTextAreaElement>();
 
   function submitFeedback() {
     modalOpen.value = false;

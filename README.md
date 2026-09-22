@@ -338,7 +338,7 @@ The `Portal` utility allows you to render a component's children into a differen
 
 ```tsx
 function App() {
-  const portalTarget = reactive<Element | undefined>(undefined);
+  const portalTarget = reactive<Element>();
 
   return (
     <>

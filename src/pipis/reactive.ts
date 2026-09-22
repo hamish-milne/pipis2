@@ -45,24 +45,24 @@ class ReactiveStateImpl<T> implements ReactiveState<T> {
 }
 
 /** Creates a simple, independently-writable {@link ReactiveState} value. */
-export const reactive = <T>(initialValue: T): ReactiveState<T> =>
-  new ReactiveStateImpl(initialValue);
+export function reactive<T>(initialValue: T): ReactiveState<T>;
+export function reactive<T>(initialValue?: T): ReactiveState<T | undefined>;
+
+export function reactive<T>(initialValue: T): ReactiveState<T> {
+  return new ReactiveStateImpl(initialValue);
+}
 
 const UNDEFINED = Symbol();
 
-class ReactiveSelect<TIn, TOut> implements ReactiveReadonly<TOut> {
+class ReactiveSelect<TIn, TOut> implements Reactive<TOut> {
   declare [REACTIVE]: true;
-  declare private _i: ReactiveReadonly<TIn>;
+  declare private _i: Reactive<TIn>;
   declare private _c: (input: TIn) => TOut;
 
-  constructor(input: ReactiveReadonly<TIn>, compute: (input: TIn) => TOut) {
+  constructor(input: Reactive<TIn>, compute: (input: TIn) => TOut) {
     this[REACTIVE] = true;
     this._i = input;
     this._c = compute;
-  }
-
-  get value(): TOut {
-    return this._c(this._i.value);
   }
 
   subscribe(callback: (newValue: TOut) => void) {
@@ -80,26 +80,26 @@ class ReactiveSelect<TIn, TOut> implements ReactiveReadonly<TOut> {
 
 /** Derives a read-only reactive value from `input` by applying `compute`, only notifying subscribers when the result actually changes. */
 export function select<TIn, TOut>(
-  input: ReactiveReadonly<TIn>,
+  input: Reactive<TIn>,
   compute: (input: TIn) => TOut,
-): ReactiveReadonly<TOut>;
+): Reactive<TOut>;
 /** Derives a read-only reactive value by selecting a single property key out of `input`. */
 export function select<TIn, TKey extends keyof TIn>(
-  input: ReactiveReadonly<TIn>,
+  input: Reactive<TIn>,
   key: TKey,
-): ReactiveReadonly<TIn[TKey]>;
+): Reactive<TIn[TKey]>;
 
 export function select<TIn, TOut>(
-  input: ReactiveReadonly<TIn>,
+  input: Reactive<TIn>,
   compute: ((input: TIn) => TOut) | keyof TIn,
-): ReactiveReadonly<TOut> {
+): Reactive<TOut> {
   return new ReactiveSelect(
     input,
     typeof compute === "function" ? compute : (input: TIn) => input[compute] as TOut,
   );
 }
 
-class ReactiveConstant<T> implements ReactiveReadonly<T> {
+class ReactiveConstant<T> implements Reactive<T> {
   declare [REACTIVE]: true;
   declare private _v: T;
 
@@ -119,4 +119,51 @@ class ReactiveConstant<T> implements ReactiveReadonly<T> {
 }
 
 /** Wraps a static value as a {@link ReactiveReadonly}, for APIs that require a reactive input. */
-export const constant = <T>(value: T): ReactiveReadonly<T> => new ReactiveConstant(value);
+export const constant = <T>(value: T): ReactiveReadonly<T> => new ReactiveConstant(value); /**
+ * Creates a context: a `[provider, consumer]` pair for passing a value down the component tree
+ * without threading it through every level of props. The consumer resolves to the nearest
+ * enclosing provider's value at the time the component is constructed.
+ */
+
+export function defineContext<T>(defaultValue: T) {
+  const stack = [defaultValue];
+  function context_provider<U>(value: T, inner: () => U): U {
+    stack.push(value);
+    try {
+      return inner();
+    } finally {
+      stack.pop();
+    }
+  }
+  const context_consumer = () => stack[stack.length - 1];
+  return [context_provider, context_consumer] as const;
+}
+export type ErrorHandler = (error: unknown) => void;
+
+export const [withErrorHandler, getErrorHandler] = defineContext<ErrorHandler>(console.error);
+type AnyFunction = (...args: any[]) => any;
+type AddReturnType<F extends AnyFunction, R> = (...args: Parameters<F>) => ReturnType<F> | R;
+
+export function handleError<T extends AnyFunction>(
+  fn: T,
+  err?: undefined,
+): AddReturnType<T, undefined>;
+export function handleError<T extends AnyFunction, TErr>(fn: T, err: TErr): AddReturnType<T, TErr>;
+
+export function handleError<T extends AnyFunction, TErr>(fn: T, err: TErr): AddReturnType<T, TErr> {
+  return function handleError_wrapper(...args) {
+    try {
+      return fn(...args);
+    } catch (error) {
+      getErrorHandler()(error);
+      return err;
+    }
+  };
+}
+
+export function subscribeWithCatch<T>(
+  reactive: Reactive<T>,
+  callback: (newValue: T) => void,
+): () => void {
+  return reactive.subscribe(handleError(callback));
+}

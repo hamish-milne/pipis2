@@ -91,7 +91,7 @@ export function Docs() {
   // Tracks which heading each block-level element "belongs to", to drive the active TOC entry
   // below: an IntersectionObserver watches every block, and whichever intersecting one comes
   // first in document order is considered the currently-read section.
-  const activeSlug = reactive<string | undefined>(undefined);
+  const activeSlug = reactive<string>();
   let currentHeadingSlug: string | undefined;
   let blockCount = 0;
   const blockInfo = new Map<Element, { slug: string; index: number }>();
