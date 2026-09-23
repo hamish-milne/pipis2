@@ -5,19 +5,21 @@ While most applications will build Elements from other, pre-defined Components o
 An Element has the following signature:
 
 ```ts
-type JSXElement = (parent?: Node, sibling?: Node | null, shadow?: true) => Node | null;
+type JSXElement = (parent?: Node, sibling?: Node | null) => Node | null;
 ```
 
 Invoking an Element function instructs it to remove or add its content and/or functionality to the DOM.
 
-The position to add any child DOM nodes is indicated by the `parent` and `sibling` arguments. The usage of these arguments matches the DOM [insertBefore](https://developer.mozilla.org/en-US/docs/Web/API/Node/insertBefore) method. If `parent` is `undefined`, then the element should be unmounted: any child nodes removed, and any event subscriptions cleaned up.
+The position to add any child DOM nodes is indicated by the `parent` and `sibling` arguments. The usage of these arguments matches the DOM [insertBefore](https://developer.mozilla.org/en-US/docs/Web/API/Node/insertBefore) method, but with the stricter guarantee that `sibling`, if present, is always a child of `parent`, and `parent` is always alive in the DOM before the Element is invoked. If `parent` is `undefined`, then the element should be unmounted: any child nodes removed, and any event subscriptions cleaned up.
 
-The Element must return a **stable head reference**: a Node that can, in turn, be passed as the `sibling` parameter of any subsequent sibling Elements. This can be either:
+The Element must return a **stable head reference**: a node that can, in turn, be passed as the `sibling` parameter of any subsequent sibling Elements. This can be either:
 
-- A Node created and owned by the Element, added as a child of `parent` on mount, which will never change until the Element is un-mounted, OR
+- A node created and owned by the Element, added as a child of `parent` on mount, which will never change until the Element is un-mounted, OR
 - The `sibling` parameter, if the Element has no DOM content. If `sibling` is null, this indicates the Element is at the right-most position (i.e. the end of the list of children).
 
-On unmount, the return value should be `sibling`.
+The space between the `sibling` argument and the returned 'head' is owned by the Element, which is free to add additional nodes anywhere between the two during or after the mount call. If these two values are the same, then the Element reserves no space for its own content.
+
+On unmount, the return value should always be `sibling` (since the Element has no DOM content after unmounting).
 
 ```ts
 const myNode = document.createElement("br");
@@ -30,9 +32,28 @@ const myElement: JSXElement = (parent, sibling = null) => {
   } else {
     myNode.remove();
   }
-  return myNode;
+  return parent ? myNode : sibling;
 };
 ```
+
+If the Element's content might change dynamically, then additional care must be taken that the returned head reference is stable. For example, if an Element returns its left-most child, then decides to unmount all its children while active, this would break the sibling reference of subsequent Elements. In these situations a **synthetic head node** can be created - a node that can act as an anchor point without otherwise affecting the document. A [Comment](https://developer.mozilla.org/en-US/docs/Web/API/Comment) node fulfils this criteria: it is ignored by anything targeting DOM elements or text, including CSS, and is only observable by specifically iterating through child nodes.
+
+```ts
+const marker = document.createComment("");
+let prevSibling: JSXSibling = null;
+const myElement: JSXElement = (parent, sibling = null) => {
+  if (parent && (marker.parentNode != parent || sibling != prevSibling)) {
+    parent.insertBefore(marker, sibling);
+    // Mount other nodes
+  } else {
+    // Unmount other nodes
+    marker.remove();
+  }
+  return parent ? marker : sibling;
+};
+```
+
+This strategy is implemented by the `dynamic()` helper function, which is in turn used by the various dynamic Components (`List`, `OneOf` etc.).
 
 ## Component lifecycle
 

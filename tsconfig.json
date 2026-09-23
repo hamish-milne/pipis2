@@ -1,10 +1,10 @@
 {
-    "compilerOptions": {
-        "jsx": "react-jsx",
-        "noEmit": true,
-        "target": "esnext",
-        "lib": ["es2015"],
-        "verbatimModuleSyntax": true
-    },
-    "include": ["src"]
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "target": "esnext",
+    "lib": ["es2015"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src"]
 }

@@ -115,6 +115,11 @@ export function FeedbackApp() {
 
       <Portal target={portalTarget}>
         <If condition={modalOpen}>
+          <Effect>
+            {() => {
+              commentBox.value?.focus();
+            }}
+          </Effect>
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-sm rounded-2xl bg-slate-900 p-6 ring-1 ring-white/10">
               <h2 className="text-lg font-semibold text-white">Tell us more</h2>
@@ -127,11 +132,6 @@ export function FeedbackApp() {
                 placeholder="What could we improve?"
                 className="mt-3 w-full rounded-lg bg-white/5 p-3 text-sm text-white ring-1 ring-white/10 transition focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
-              <Effect>
-                {() => {
-                  commentBox.value?.focus();
-                }}
-              </Effect>
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   onclick={() => (modalOpen.value = false)}

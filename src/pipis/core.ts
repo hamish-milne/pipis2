@@ -45,11 +45,8 @@ export type JSXSibling = Node | null;
  *
  * Calling mount again with the same `parent`/`sibling` (or moving to a different one) must be a
  * cheap, idempotent operation - see {@link moveNode}.
- *
- * If `shadow` is `true`, the element is not yet in the main DOM tree despite having a parent,
- * so side-effects and subscriptions should be deferred.
  */
-export type JSXElement = (parent?: JSXParent, sibling?: JSXSibling, shadow?: true) => Node | null;
+export type JSXElement = (parent?: JSXParent, sibling?: JSXSibling) => Node | null;
 
 /** A child that renders as a DOM text node: any other primitive value is stringified, `null`/`undefined` render as empty. */
 export type Content = string | number | false | null | undefined;
@@ -95,10 +92,10 @@ export function Fragment(props: ChildrenProp): JSXElement {
   if (childElements.length <= 1) {
     return childElements[0] ?? emptyElement;
   }
-  return function Fragment_element(parent, sibling = null, shadow) {
+  return function Fragment_element(parent, sibling = null) {
     let head = sibling;
     for (const child of childElements) {
-      head = child(parent, head, shadow);
+      head = child(parent, head);
     }
     return head;
   };
@@ -107,12 +104,13 @@ export function Fragment(props: ChildrenProp): JSXElement {
 /**
  * Moves a node to a different position in the DOM, if needed.
  */
-export function moveNode(element: ChildNode, parent: JSXParent, sibling: JSXSibling) {
-  if (element.parentNode != parent || element.nextSibling != sibling) {
+export function moveNode(element: ChildNode, parent: JSXParent, sibling?: JSXSibling) {
+  const prevParent = element.parentNode;
+  if (prevParent != parent || (sibling !== undefined && element.nextSibling != sibling)) {
     if (parent) {
-      parent.insertBefore(element, sibling);
+      parent.insertBefore(element, sibling ?? null);
     } else {
-      element.remove();
+      prevParent?.removeChild(element);
     }
     return true;
   }
@@ -135,8 +133,8 @@ export function textNode(content: Content | Reactive<Content>): JSXElement {
     setText(node, content);
   }
   let cleanup: Cleanup | undefined;
-  return function textNode_element(parent, sibling = null, shadow) {
-    if (parent && !shadow) {
+  return function textNode_element(parent, sibling = null) {
+    if (parent) {
       cleanup ??=
         contentReactive &&
         subscribe(contentReactive, function textNode_binding(newValue) {
@@ -245,26 +243,22 @@ export function createElement<T extends keyof IntrinsicElements>(
   }
   setRef(props, element);
   const children = Fragment(props);
-  // Create the node hierarchy for the children in a detached state.
-  // This ensures that when the node is attached to the DOM for the first time
-  // there's only a single insertBefore() operation on the live DOM.
-  children(element, null, true);
-  return function jsxIntrinsic_element(parent, sibling = null, shadow) {
-    moveNode(element, parent, sibling);
-    if (parent && !shadow) {
+  return function jsxIntrinsic_element(parent, sibling = null) {
+    if (moveNode(element, parent, sibling)) {
+      if (parent) {
+        for (const b of bindings) {
+          const [key, reactive] = b;
+          b[2] ??= subscribe(reactive, function jsxIntrinsic_binding(newValue) {
+            setAttribute(element, key, newValue);
+          });
+        }
+      } else {
+        for (const b of bindings) {
+          b[2]?.();
+          b[2] = null;
+        }
+      }
       children(element);
-      for (const b of bindings) {
-        const [key] = b;
-        b[2] ??= subscribe(b[1], function jsxIntrinsic_binding(newValue) {
-          setAttribute(element, key, newValue);
-        });
-      }
-    } else {
-      for (const b of bindings) {
-        b[2]?.();
-        b[2] = null;
-      }
-      children(element, null, true);
     }
     return parent ? element : sibling;
   };

@@ -170,18 +170,7 @@ function App() {
 }
 ```
 
-For lists, you can use `Repeat` to render a variable number of items:
-
-```tsx
-function App() {
-  const items = reactive(["Item 1", "Item 2", "Item 3"]);
-  return (
-    <Repeat count={select(items, "length")}>{(index) => <div>{select(items, index)}</div>}</Repeat>
-  );
-}
-```
-
-Or you can use `List` to render items from an array, with a 'key' function to allow re-ordering:
+For lists, you can use `List` to render items from an array, with a 'key' function to allow re-ordering:
 
 ```tsx
 function App() {

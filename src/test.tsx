@@ -9,7 +9,6 @@ import {
   List,
   Portal,
   PortalTarget,
-  Repeat,
   Suspense,
   type PortalTargetValue,
 } from "./pipis/dynamic";
@@ -33,10 +32,10 @@ export function TodoApp() {
   const todos = reactive<readonly string[]>([]);
   const newTodo = reactive("");
 
-  function todoItem(index: number) {
+  function todoItem(item: string, index: number) {
     return (
       <li>
-        {select(todos, (t) => t[index])}
+        {item}
         <button
           onclick={() => {
             todos.value = todos.value.filter((_, i) => i !== index);
@@ -51,7 +50,9 @@ export function TodoApp() {
   return (
     <>
       <ul>
-        <Repeat count={select(todos, (t) => t.length)}>{todoItem}</Repeat>
+        <List items={todos} itemKey={(item, index) => index}>
+          {todoItem}
+        </List>
       </ul>
       <div>
         <input type="text" value={newTodo} onchange={(e) => (newTodo.value = e.target.value)} />

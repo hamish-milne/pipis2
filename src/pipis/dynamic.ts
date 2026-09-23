@@ -38,55 +38,22 @@ type MountFn = (parent: Exclude<JSXParent, undefined>, sibling: JSXSibling) => C
 export function dynamic(mount: MountFn, unmount: Cleanup): JSXElement {
   const marker = createMarker();
   let cleanup: Cleanup | void;
-  return function Dynamic_element(parent, sibling = null, shadow) {
-    if (moveNode(marker, parent, sibling) || (!cleanup && parent && !shadow)) {
-      // Either the node was moved, or it's visible in the DOM but hasn't been activated yet.
+  let nextSibling: JSXSibling = null;
+  return function Dynamic_element(parent, sibling = null) {
+    // Manually track the sibling here because the mount function adds additional nodes,
+    // so the marker's DOM sibling isn't the same as the element's sibling.
+    if (moveNode(marker, parent) || sibling !== nextSibling) {
       cleanup?.();
-      if (parent && !shadow) {
+      if (parent) {
         cleanup = mount(parent, sibling);
       } else {
         cleanup = undefined;
         unmount();
       }
+      nextSibling = sibling;
     }
     return parent ? marker : sibling;
   };
-}
-
-/** Renders `count` items in sequence, adding or removing from the end as `count` changes. */
-export function Repeat({
-  count,
-  children,
-}: {
-  count: Reactive<number>;
-  children: (index: number) => JSXElement;
-}): JSXElement {
-  const items: JSXElement[] = [];
-  const Repeat_mount: MountFn = (parent, sibling) =>
-    subscribeWithCatch(count, function Repeat_count(newLength) {
-      // Remove excess items from the end of the list
-      while (items.length > newLength) {
-        items.pop()?.();
-      }
-      let head = sibling;
-      // Add new items to the end of the list, adding the higher index to the RHS, so the end result is in the natural order.
-      let i = newLength - 1;
-      for (const j = items.length; i > j; i--) {
-        const child = children(items.length);
-        items.push(child);
-        head = child(parent, head);
-      }
-      // Set the RHS of the existing items to the LHS of the newly added items.
-      for (; i >= 0; i--) {
-        head = items[i](parent, head);
-      }
-    });
-  return dynamic(Repeat_mount, function Repeat_unmount() {
-    for (const item of items) {
-      item();
-    }
-    items.length = 0;
-  });
 }
 
 /**
@@ -167,7 +134,11 @@ export function If({
   const children = Fragment(props);
   const If_mount: MountFn = (parent, sibling) =>
     subscribeWithCatch(condition, function If_value(newValue) {
-      children(newValue ? parent : undefined, sibling);
+      if (newValue) {
+        children(parent, sibling);
+      } else {
+        children();
+      }
     });
   return dynamic(If_mount, function If_unmount() {
     children();
@@ -205,8 +176,8 @@ export function Dynamic<T>({
 export function effect(fn: () => Cleanup | undefined): JSXElement {
   let cleanup: Cleanup | undefined;
   const fnWrapped = handleError(fn);
-  return function Effect_element(parent, sibling = null, shadow) {
-    if (parent && !shadow) {
+  return function Effect_element(parent, sibling = null) {
+    if (parent) {
       cleanup ??= fnWrapped();
     } else {
       cleanup?.();
@@ -363,60 +334,17 @@ export function Portal({
  */
 export function Helmet(props: ChildrenProp): JSXElement {
   const children = Fragment(props);
-  return function Helmet_element(parent, sibling = null, shadow) {
-    if (parent && !shadow) {
+  let mounted = false;
+  return function Helmet_element(parent, sibling = null) {
+    if (parent && !mounted) {
       const { head } = document;
       // This ensures new Helmet children are inserted at the beginning, so they take priority.
       children(head, head.firstChild);
-    } else {
+      mounted = true;
+    } else if (!parent && mounted) {
       children();
+      mounted = false;
     }
     return sibling;
   };
-}
-
-/**
- * Renders its children reactively, updating the DOM whenever the reactive `children` value
- * changes. Changed children are mounted/unmounted from the right-hand side of the node list.
- * Children at the start of the array are re-used where possible; for full re-ordering support
- * consider {@link List}.
- */
-export function ReactiveChildren({
-  children,
-}: {
-  children: Reactive<ChildrenProp["children"]>;
-}): JSXElement {
-  let previous: JSXElement[] = [];
-  let head: JSXSibling = null;
-
-  return dynamic(
-    function ReactiveChildren_mount(parent, sibling) {
-      head = sibling;
-      return subscribeWithCatch(children, function ReactiveChildren_update(newValue) {
-        const next = normalizeChildren(newValue);
-        const prevLength = previous.length;
-        const newLength = next.length;
-        let prefix: number;
-        for (
-          prefix = 0;
-          prefix < prevLength && prefix < newLength && previous[prefix] === next[prefix];
-          prefix++
-        );
-        for (let i = prevLength - 1; i >= prefix; i--) {
-          head = previous[i]();
-        }
-        for (let i = prefix; i < newLength; i++) {
-          head = next[i](parent, head);
-        }
-        previous = next;
-      });
-    },
-    function ReactiveChildren_unmount() {
-      for (const child of previous) {
-        child();
-      }
-      previous = [];
-      head = null;
-    },
-  );
 }
